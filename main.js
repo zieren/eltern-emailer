@@ -5,24 +5,24 @@ const nodemailer = require('nodemailer');
 const THREADS_FILE = 'kommunikation_fachlehrer.json';
 const CONFIG = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
 
-(async () => {
-  const browser = await puppeteer.launch();
-  const page = await browser.newPage();
-
-  console.log('Logging in...');
-  await page.goto('https://theogymuc.eltern-portal.org/');
+async function login(page) {
+  console.log('Logging in');
+  await page.goto(CONFIG.elternportal.url);
   await page.type('#inputEmail', CONFIG.elternportal.email);
   await page.type('#inputPassword', CONFIG.elternportal.password);
   await Promise.all([
     page.click('#inputPassword ~ button'),
     page.waitForNavigation()
   ]);
+}
 
-  const previousThreads = JSON.parse(fs.readFileSync(THREADS_FILE, 'utf-8'));
-
-  // Build the list of teachers that have communicated.
-  console.log('Reading teachers...');
-  await page.goto('https://theogymuc.eltern-portal.org/meldungen/kommunikation_fachlehrer');
+/**
+ * Reads the list of teachers with at least one thread. Returns a map of teacher ID to a dict with
+ * keys 'url' and 'name'.
+ */
+async function readActiveTeachers(page) {
+  console.log('Reading active teachers');
+  await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer');
   const teachersList = await page.$$eval(
     'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"',
     (anchors) => anchors.map(
@@ -35,17 +35,22 @@ const CONFIG = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
           name: a.parentElement.parentElement.firstChild.textContent
         };
       }));
-  // Map of teacher ID to details (name and URL).
+  console.log('Active teachers: ' + teachersList.length);
   const teachers = {};
   teachersList.forEach((t) => {
     teachers[t.id] = t;
     delete t.id;
   });
+  return teachers;
+}
 
-  // Retrieve metadata for all threads.
-  // Map of thread ID to details (list of messages in thread).
+/**
+ * Reads metadata for all threads, based on active teachers returned by readActiveTeachers().
+ * Returns a map of thread ID to a dict with keys 'subject' and 'url'.
+ */
+async function readThreadsMeta(page, teachers) {
   const threads = {};
-  for (const [ignored, teacher] of Object.entries(teachers)) {
+  for (const [_, teacher] of Object.entries(teachers)) {
     console.log('Reading threads with: ' + teacher.name);
     await page.goto(teacher.url);
     const threadsList = await page.$$eval(
@@ -64,11 +69,13 @@ const CONFIG = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
       delete t.id;
     });
   }
+  return threads;
+}
 
-  // Retrieve thread contents.
-  console.log('Reading thread contents...');
-  for (const [ignored, thread] of Object.entries(threads)) {
-    await page.goto(thread['url'] + '?load_all=1');
+async function readThreadsContents(page, threads) {
+  console.log('Reading contents for ' + Object.keys(threads).length + ' threads');
+  for (const [_, thread] of Object.entries(threads)) {
+    await page.goto(thread.url + '?load_all=1');
     thread.messages = await page.$$eval(
       'div.arch_kom',
       (divs) => divs.map((d) => {
@@ -77,7 +84,19 @@ const CONFIG = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
           body: d.textContent
         };
       }));
+    console.log(thread.messages.length + ' messages in "'+ thread.subject + '"');
   }
+}
+
+(async () => {
+  const previousThreads = JSON.parse(fs.readFileSync(THREADS_FILE, 'utf-8'));
+  const browser = await puppeteer.launch();
+  const page = await browser.newPage();
+
+  await login(page);
+  const teachers = await readActiveTeachers(page);
+  const threads = await readThreadsMeta(page, teachers);
+  await readThreadsContents(page, threads);
 
   // Send emails.
   const emails = [];
@@ -105,7 +124,7 @@ const CONFIG = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
   // TODO: This runs the risk of flooding. Emails should be throttled. Possibly helpful:
   // https://www.npmjs.com/package/quota
   if (emails.length) {
-    console.log('Emailing new messages...');
+    console.log('Emailing new messages');
     const transport = nodemailer.createTransport({
       host: CONFIG.email.server,
       port: 465,
@@ -133,7 +152,7 @@ const CONFIG = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
   // TODO: This will get stuck on a query of death and resend everything. Save state with the
   // failure removed? Remember the failure (hash?), notify about it and skip it next time?
   if (!emailsFailed) {
-    console.log('Updating persistent state in ' + THREADS_FILE + '...');
+    console.log('Updating persistent state in ' + THREADS_FILE);
     fs.writeFileSync(THREADS_FILE, JSON.stringify(threads, null, 2));
   }
 
