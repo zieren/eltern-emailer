@@ -1,7 +1,9 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
+const nodemailer = require('nodemailer');
 
 const THREADS_FILE = 'kommunikation_fachlehrer.json';
+const CREDENTIALS = JSON.parse(fs.readFileSync('credentials.json', 'utf-8'));
 
 (async () => {
   const browser = await puppeteer.launch();
@@ -9,8 +11,8 @@ const THREADS_FILE = 'kommunikation_fachlehrer.json';
 
   console.log('Logging in...');
   await page.goto('https://theogymuc.eltern-portal.org/');
-  await page.type('#inputEmail', 'eltern@zieren.de');
-  await page.type('#inputPassword', 'gvx5ZN6VMxZr3EF');
+  await page.type('#inputEmail', CREDENTIALS.elternportal.email);
+  await page.type('#inputPassword', CREDENTIALS.elternportal.password);
   await Promise.all([
     page.click('#inputPassword ~ button'),
     page.waitForNavigation()
