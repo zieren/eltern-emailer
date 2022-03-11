@@ -1,17 +1,25 @@
 const puppeteer = require('puppeteer');
+const fs = require('fs');
+
+const THREADS_FILE = 'kommunikation_fachlehrer.json';
 
 (async () => {
   const browser = await puppeteer.launch();
   const page = await browser.newPage();
+
+  console.log('Logging in...');
   await page.goto('https://theogymuc.eltern-portal.org/');
   await page.type('#inputEmail', 'eltern@zieren.de');
   await page.type('#inputPassword', 'gvx5ZN6VMxZr3EF');
   await Promise.all([
     page.click('#inputPassword ~ button'),
-    page.waitForNavigation(),
+    page.waitForNavigation()
   ]);
 
+  const previousThreads = JSON.parse(fs.readFileSync(THREADS_FILE, 'utf-8'));
+
   // Build the list of teachers that have communicated.
+  console.log('Reading teachers...');
   await page.goto('https://theogymuc.eltern-portal.org/meldungen/kommunikation_fachlehrer');
   const teachersList = await page.$$eval(
     'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"',
@@ -23,7 +31,7 @@ const puppeteer = require('puppeteer');
           'id': id,
           'url': a.href,
           'name': a.parentElement.parentElement.firstChild.textContent
-        }
+        };
       }));
   // Map of teacher ID to details (name and URL).
   const teachers = {};
@@ -31,13 +39,12 @@ const puppeteer = require('puppeteer');
     teachers[t['id']] = t;
     delete t['id'];
   });
-  console.log(JSON.stringify(teachers));
 
   // Retrieve metadata for all threads.
   // Map of thread ID to details (list of messages in thread).
   const threads = {};
   for (const [ignored, teacher] of Object.entries(teachers)) {
-    console.log('Reading threads for: ' + teacher['name']);
+    console.log('Reading threads with: ' + teacher['name']);
     await page.goto(teacher['url']);
     const threadsList = await page.$$eval(
       'a[href*="meldungen/kommunikation_fachlehrer/"',
@@ -55,10 +62,9 @@ const puppeteer = require('puppeteer');
       delete t['id'];
     });
   }
-  console.log(JSON.stringify(threads));
-  console.log('------------------------------')
 
   // Retrieve thread contents.
+  console.log('Reading thread contents...');
   for (const [ignored, thread] of Object.entries(threads)) {
     await page.goto(thread['url'] + '?load_all=1');
     thread['messages'] = await page.$$eval(
@@ -67,12 +73,27 @@ const puppeteer = require('puppeteer');
         return {
           'author': d.parentElement.parentElement.firstChild.textContent,
           'body': d.textContent
-        }
+        };
       }));
   }
-  console.log(JSON.stringify(threads));
 
-  // TODO: Read previous threads. Compare by thread ID. Email new messages.
+  console.log('Emailing new messages...');
+  for (const [threadId, thread] of Object.entries(threads)) {
+    if (threadId in previousThreads
+        && previousThreads[threadId]['messages'].length === thread['messages'].length) {
+      continue;
+    };
+    const messages = thread['messages'];
+    for (let i = previousThreads[threadId]['messages'].length; i < messages.length; ++i) {
+      console.log(messages[i]['body']);
+    }
+  };
+
+  // TODO: Conditional on successful email!!
+  console.log('Updating persistent state in ' + THREADS_FILE + '...');
+  fs.writeFileSync(THREADS_FILE, JSON.stringify(threads, null, 2));
+
+  // TODO: Email new messages.
   // Store these threads if email was successful.
 
   await browser.close();
