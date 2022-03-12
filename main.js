@@ -1,6 +1,6 @@
-const puppeteer = require('puppeteer');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
+const puppeteer = require('puppeteer');
 
 const THREADS_FILE = 'kommunikation_fachlehrer.json';
 const CONFIG = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
@@ -136,6 +136,7 @@ async function readThreadsContents(page, threads) {
     });
     for (let i = 0; i < emails.length; ++i) {
       console.log(JSON.stringify(emails[i], null, 2));
+      // TODO: Do we need to throttle these? Maybe simply wait a few seconds?
       transport.sendMail(emails[i], function(error, info) {
         if (error) {
           console.log('Failed to send email: ' + error);
@@ -153,6 +154,7 @@ async function readThreadsContents(page, threads) {
   // failure removed? Remember the failure (hash?), notify about it and skip it next time?
   if (!emailsFailed) {
     console.log('Updating persistent state in ' + THREADS_FILE);
+    // TODO: Strip full text.
     fs.writeFileSync(THREADS_FILE, JSON.stringify(threads, null, 2));
   }
 
