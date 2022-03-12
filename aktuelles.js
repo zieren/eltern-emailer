@@ -1,6 +1,7 @@
 const contentDisposition = require('content-disposition');
 const https = require('https');
 const fs = require('fs');
+const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
 
 const CONFIG = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
@@ -45,45 +46,69 @@ async function readLetters(page) {
 }
 
 async function readAttachments(page, letters, skipIDs) {
-  // https://stackoverflow.com/questions/4579757/how-do-i-create-a-http-client-request-with-a-cookie
-  // https://stackoverflow.com/questions/51618804/how-to-download-a-file-into-a-buffer-in-node-js
   console.log('Reading attachments');
   const cookies = await page.cookies();
   console.log('Cookies: ' + JSON.stringify(cookies, null, 2));
-  const phpsessid = await getPHPSESSID(page);
-  var options = {
-      headers: { 'Cookie': phpsessid }
-  };
+  var options = {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
   for (const [id, letter] of Object.entries(letters)) {
     if (id in skipIDs || !('url' in letter)) {
       continue;
     }
     console.log('Reading attachment for: ' + letter.subject);
-    // TODO: Do we need to throttle these? Maybe simply wait a few seconds?
-    let out = null;
-    const decoder = new TextDecoder();
-    console.log(letter.url);
-    const request = https.get(letter.url, options, (res) => {
-      console.log('statusCode:', res.statusCode); // TODO: Handle.
-      console.log('headers:', res.headers);
-      // TODO: Decode UTF8 at some point.
-      const filename =
-          contentDisposition.parse(res.headers['content-disposition']).parameters.filename;
-      out = fs.createWriteStream('letters/' + filename);
-      res.on('data', (d) => {
-        out.write(d); // TODO: Handle retval.
+    // TODO: Do we need to throttle here? Maybe simply wait a few seconds?
+    const transport = nodemailer.createTransport({
+      host: CONFIG.email.server,
+      port: 465,
+      secure: true,
+      auth: {
+        user: CONFIG.email.username,
+        pass: CONFIG.email.password
+      }
+    });
+    // Collect buffers and use Buffer.concat() to avoid chunk sizes arithmetics.
+    let buffers = [];
+    https.get(letter.url, options, (response) => {
+      console.log('statusCode:', response.statusCode); // TODO: Handle.
+      console.log('headers:', response.headers);
+      // TODO: Decode UTF8 at some point. Buffer.from()? https://nodejs.org/api/buffer.html
+      letter.filename =
+          contentDisposition.parse(response.headers['content-disposition']).parameters.filename;
+      response.on('data', (d) => {
+        buffers.push(d);
+      }).on('end', () => {
+        letter.content = Buffer.concat(buffers);
+        console.log('attachment: ' + letter.content.length);
+        const email = {
+          from: CONFIG.email.from,
+          to: CONFIG.email.to,
+          subject: letter.subject,
+          text: letter.body,
+          attachments: [
+            {
+              filename: letter.filename,
+              content: letter.content
+            }
+          ]
+        };
+        transport.sendMail(email, function(error, info) {
+          if (error) {
+            console.log('Failed to send email: ' + error);
+          } else {
+            console.log('Email sent: ' + info.response);
+          }
+        });
+
+
       });
+    }).on('error', (e) => {
+      console.error('Aw dang: ' + e); // TODO: Handle.
     });
-    request.on('error', (e) => {
-      console.error('Aw dang: ' + e);
-    });
-    request.on('end', () => {
-      out.end();
-    });
+
+    break; // TODO
   };
 }
 
-async function getPHPSESSID(page) { // TODO: ...AsCookie() or sth
+async function getPhpSessionIdAsCookie(page) {
   const cookies = await page.cookies();
   const id = cookies.filter(c => c.name === "PHPSESSID");
   return id.length === 1 ? id[0].name + '=' + id[0].value : ''; // TODO: Handle this?
