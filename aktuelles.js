@@ -1,14 +1,23 @@
 /* global Buffer, Promise */
 
+// TODO: "letters" -> "announcements"? "news"?
+
 const contentDisposition = require('content-disposition');
 const https = require('https');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
 
+/** Our config. */
 const CONFIG = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
+/**
+ * List of already processed (i.e. emailed) items. Contains the following keys:
+ * - 'letters': Letters in "Aktuelles".
+ * - 'threads': Threads in "Kommunikation Eltern/Fachlehrer".
+ */
 const PROCESSED_ITEMS_FILE = 'processed.json';
 
+/** This function does the thing. The login thing. You know? */
 async function login(page) {
   console.log('Logging in');
   await page.goto(CONFIG.elternportal.url);
@@ -20,6 +29,7 @@ async function login(page) {
   ]);
 }
 
+/** Reads all letters, but not possible attachments. */
 async function readLetters(page) {
   console.log('Reading letters');
   await page.goto(CONFIG.elternportal.url + '/aktuelles/elternbriefe');
@@ -43,6 +53,10 @@ async function readLetters(page) {
   return letters;
 }
 
+/**
+ * Reads attachments for all letters not included in processedLetters. Attachments are stored in
+ * memory.
+ */
 async function readAttachments(page, letters, processedLetters) {
   console.log('Reading attachments');
   const options = {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
@@ -74,7 +88,7 @@ async function readAttachments(page, letters, processedLetters) {
   }
 }
 
-function buildEmails(letters, processedLetters) {
+function buildEmailsForLetters(letters, processedLetters) {
   return letters
       .filter(letter => !(letter.id in processedLetters))
       // Send oldest letters first, i.e. maintain chronological order. This is not reliable because
@@ -99,13 +113,100 @@ function buildEmails(letters, processedLetters) {
         }
         return {
           email: email,
-          id: letter.id
+          ok: () => { processedLetters[letter.id] = 1; }
         };
       });
 }
+/** Returns the list of teachers with at least one thread. */
+async function readActiveTeachers(page) {
+  console.log('Reading active teachers');
+  await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer');
+  const teachers = await page.$$eval(
+    'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"',
+    (anchors) => anchors.map(
+      (a) => {
+        return {
+          id: a.href.match(/.*\/([0-9]+)\//)[1],
+          url: a.href,
+          name: a.parentElement.parentElement.firstChild.textContent
+        };
+      }));
+  console.log('Active teachers: ' + teachers.length);
+  return [teachers[0]];//TODO;
+}
 
+// TODO: Fold this into readActiveTeachers()? Does $$eval() support that?
+/**
+ * Reads metadata for all threads, based on active teachers returned by readActiveTeachers().
+ * Threads are stored with key 'threads' for each teacher.
+ */
+async function readThreadsMeta(page, teachers) {
+  for (const teacher of teachers) {
+    console.log('Reading threads with: ' + teacher.name);
+    await page.goto(teacher.url);
+    teacher.threads = await page.$$eval(
+        'a[href*="meldungen/kommunikation_fachlehrer/"',
+        (anchors) => anchors.map((a) => {
+          return {
+            id: a.href.match(/.*\/([0-9]+)$/)[1],
+            url: a.href,
+            subject: a.textContent
+          };
+        }));
+  }
+}
 
-async function sendEmails(emails, processedLetters) {
+/**
+ * Populates threads with contents, i.e. individual messages. This is the only way to detect new
+ * messages.
+ */
+async function readThreadsContents(page, teachers) {
+  console.log('Reading thread contents');
+  for (const teacher of teachers) {
+    for (const thread of teacher.threads) {
+      await page.goto(thread.url + '?load_all=1'); // Prevent pagination.
+      thread.messages = await page.$$eval(
+          'div.arch_kom',
+          (divs) => divs.map((d) => {
+            return {
+              author: d.parentElement.parentElement.firstChild.textContent,
+              body: d.textContent
+            };
+          }));
+      console.log(thread.messages.length + ' messages in "'+ thread.subject + '"');
+    }
+  }
+}
+
+function buildEmailsForThreads(teachers, processedThreads) {
+  const emails = [];
+  for (const teacher of teachers) {
+    for (const thread of teacher.threads) {
+      if (!(thread.id in processedThreads)) {
+        processedThreads[thread.id] = {};
+      }
+      // If messages can ever be deleted, we'd need to hash because n could remain constant or even
+      // decrease when messages disappear.
+      for (let i = 0; i < thread.messages.length; ++i) {
+        // TODO: This yields " (Elternportal - Borchard Annette:(02.02.2022) )"
+        // -> Author is available, fix retrieval.
+        console.log(' (Elternportal - ' + thread.messages[i].author + ')'); // TODO
+        emails.push({
+          email: {
+            from: CONFIG.email.from,
+            to: CONFIG.email.to,
+            subject: thread.subject,
+            text: thread.messages[i].body
+          },
+          ok: () => { processedThreads[thread.id][i] = 1; }
+        });
+      }
+    };
+  }
+  return emails;
+}
+
+async function sendEmails(emails) {
   if (!emails.length) {
     return;
   }
@@ -134,13 +235,15 @@ async function sendEmails(emails, processedLetters) {
           reject(error);
         } else {
           console.log('Email sent: ' + info.response);
-          processedLetters[e.id] = 1;
+          e.ok();
           resolve(null);
         }
       });
     });
   }
 }
+
+// ----- Kommunikation Eltern/Fachlehrer -----
 
 async function getPhpSessionIdAsCookie(page) {
   const cookies = await page.cookies();
@@ -154,10 +257,20 @@ async function getPhpSessionIdAsCookie(page) {
   const page = await browser.newPage();
 
   await login(page);
-  const letters = await readLetters(page); // Always reads all.
-  await readAttachments(page, letters, processedItems.letters);
-  const emails = buildEmails(letters, processedItems.letters);
-  await sendEmails(emails, processedItems.letters);
+
+  // Section "Aktuelles".
+//  const letters = await readLetters(page); // Always reads all.
+//  await readAttachments(page, letters, processedItems.letters);
+//  const emails = buildEmailsForLetters(letters, processedItems.letters);
+//  await sendEmails(emails);
+
+  // Section "Kommunikation Eltern/Fachlehrer".
+  const teachers = await readActiveTeachers(page);
+  await readThreadsMeta(page, teachers);
+  await readThreadsContents(page, teachers);
+  const emails = buildEmailsForThreads(teachers, processedItems.threads);
+  await sendEmails(emails);
+
   await browser.close();
   fs.writeFileSync(PROCESSED_ITEMS_FILE, JSON.stringify(processedItems, null, 2));
 })();
