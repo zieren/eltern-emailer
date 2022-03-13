@@ -74,55 +74,67 @@ async function readAttachments(page, letters, processedLetters) {
   }
 }
 
-async function sendEmail(letters, processedLetters) {
-  let transport = null;
-  // Send oldest letters first, i.e. maintain chronological order. This is not reliable because
-  // emails race, but GMail ignores the carefully forged message creation date (it shows the
-  // reception date instead), so it's the best we can do.
-  for (const letter of letters.reverse()) {
-    if (letter.id in processedLetters) {
-      continue;
-    }
-    const email = {
-      from: CONFIG.email.from + ' (Elternportal - Aktuelles)',
-      to: CONFIG.email.to,
-      subject: letter.subject,
-      text: letter.body,
-      date: new Date(letter.dateString)
-    };
-    console.log(email.date);
-    if (letter.content) {
-      email.attachments = [
-        {
-          filename: letter.filename,
-          content: letter.content
+function buildEmails(letters, processedLetters) {
+  return letters
+      .filter(letter => !(letter.id in processedLetters))
+      // Send oldest letters first, i.e. maintain chronological order. This is not reliable because
+      // emails race, but GMail ignores the carefully forged message creation date (it shows the
+      // reception date instead), so it's the best we can do.
+      .reverse()
+      .map(letter => {
+        const email = {
+          from: CONFIG.email.from + ' (Elternportal - Aktuelles)',
+          to: CONFIG.email.to,
+          subject: letter.subject,
+          text: letter.body,
+          date: new Date(letter.dateString)
+        };
+        if (letter.content) {
+          email.attachments = [
+            {
+              filename: letter.filename,
+              content: letter.content
+            }
+          ];
         }
-      ];
-    }
-    if (!transport) {
-      // TODO: Expose more mail server config.
-      transport = nodemailer.createTransport({
-        host: CONFIG.email.server,
-        port: 465,
-        secure: true,
-        auth: {
-          user: CONFIG.email.username,
-          pass: CONFIG.email.password
-        }
+        return {
+          email: email,
+          id: letter.id
+        };
       });
-    } else {
-      // Throttle outgoing emails.
+}
+
+
+async function sendEmails(emails, processedLetters) {
+  if (!emails.length) {
+    return;
+  }
+  // TODO: Expose more mail server config.
+  const transport = nodemailer.createTransport({
+    host: CONFIG.email.server,
+    port: 465,
+    secure: true,
+    auth: {
+      user: CONFIG.email.username,
+      pass: CONFIG.email.password
+    }
+  });
+  let first = true;
+  for (const e of emails) {
+    // Throttle outgoing emails.
+    if (!first) {
       await new Promise(f => setTimeout(f, CONFIG.email.waitSeconds * 1000));
     }
-    console.log('Sending email "' + letter.subject + '"');
+    first = false;
+    console.log('Sending email "' + e.email.subject + '"');
     await new Promise((resolve, reject) => {
-      transport.sendMail(email, (error, info) => {
+      transport.sendMail(e.email, (error, info) => {
         if (error) {
           console.log('Failed to send email: ' + error); // TODO: Handle.
           reject(error);
         } else {
           console.log('Email sent: ' + info.response);
-          processedLetters[letter.id] = 1;
+          processedLetters[e.id] = 1;
           resolve(null);
         }
       });
@@ -144,7 +156,8 @@ async function getPhpSessionIdAsCookie(page) {
   await login(page);
   const letters = await readLetters(page); // Always reads all.
   await readAttachments(page, letters, processedItems.letters);
-  await sendEmail(letters, processedItems.letters);
+  const emails = buildEmails(letters, processedItems.letters);
+  await sendEmails(emails, processedItems.letters);
   await browser.close();
   fs.writeFileSync(PROCESSED_ITEMS_FILE, JSON.stringify(processedItems, null, 2));
 })();
