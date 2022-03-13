@@ -23,24 +23,23 @@ async function login(page) {
 async function readLetters(page) {
   console.log('Reading letters');
   await page.goto(CONFIG.elternportal.url + '/aktuelles/elternbriefe');
-  const lettersList = await page.$$eval(
+  const letters = await page.$$eval(
     'span.link_nachrichten, a.link_nachrichten',
     (nodes) => nodes.map(
       (n) => {
+        // Transform the date to a format that Date can parse.
+        const d = n.firstChild.nextSibling.textContent
+            .match(/(\d\d)\.(\d\d)\.(\d\d\d\d) +(\d\d:\d\d:\d\d)/);
         return {
           // Use the ID also used for reading confirmation, because it should be stable.
           id: n.attributes.onclick.textContent.match(/\(([0-9]+)\)/)[1],
           body: n.parentElement.outerText.substring(n.outerText.length).trim(),
-          subject: n.tagName === 'A' ? n.textContent : n.firstChild.textContent,
-          url: n.tagName === 'A' ? n.href : null
+          subject: n.firstChild.textContent,
+          url: n.tagName === 'A' ? n.href : null,
+          dateString: d[3] + '-' + d[2] + '-' + d[1] + ' ' + d[4]
         };
       }));
-  console.log('Letters: ' + lettersList.length);
-  const letters = {};
-  lettersList.forEach((letter) => {
-    letters[letter.id] = letter;
-    delete letter.id;
-  });
+  console.log('Letters: ' + letters.length);
   return letters;
 }
 
@@ -48,8 +47,8 @@ async function readAttachments(page, letters, processedLetters) {
   console.log('Reading attachments');
   const requests = [];
   const options = {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
-  for (const [id, letter] of Object.entries(letters)) {
-    if (id in processedLetters || !letter.url) {
+  for (const letter of letters) {
+    if (letter.id in processedLetters || !letter.url) {
       continue;
     }
     // Collect buffers and use Buffer.concat() to avoid messing with chunk size arithmetics.
@@ -81,16 +80,20 @@ async function sendEmail(letters, processedLetters) {
   const requests = [];
   // TODO: Expose more mail server config.
   let transport = null;
-  for (const [id, letter] of Object.entries(letters)) {
-    if (id in processedLetters) {
+  // Send oldest letters first, i.e. maintain chronological order.
+  // TODO: This is not reliable. Forge date instead.
+  for (const letter of letters.reverse()) {
+    if (letter.id in processedLetters) {
       continue;
     }
     const email = {
       from: CONFIG.email.from + ' (Elternportal - Aktuelles)',
       to: CONFIG.email.to,
       subject: letter.subject,
-      text: letter.body
+      text: letter.body,
+      date: new Date(letter.dateString)
     };
+    console.log(email.date);
     if (letter.content) {
       email.attachments = [
         {
@@ -120,7 +123,7 @@ async function sendEmail(letters, processedLetters) {
           reject(error);
         } else {
           console.log('Email sent: ' + info.response);
-          processedLetters[id] = 1;
+          processedLetters[letter.id] = 1;
           resolve(null);
         }
       });
