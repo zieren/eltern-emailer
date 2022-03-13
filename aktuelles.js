@@ -45,7 +45,6 @@ async function readLetters(page) {
 
 async function readAttachments(page, letters, processedLetters) {
   console.log('Reading attachments');
-  const requests = [];
   const options = {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
   for (const letter of letters) {
     if (letter.id in processedLetters || !letter.url) {
@@ -54,7 +53,7 @@ async function readAttachments(page, letters, processedLetters) {
     // Collect buffers and use Buffer.concat() to avoid messing with chunk size arithmetics.
     let buffers = [];
     // It seems attachment downloads don't need to be throttled.
-    requests.push(new Promise((resolve, reject) => {
+    await new Promise((resolve, reject) => {
       https.get(letter.url, options, (response) => {
         // TODO: Decode UTF8 at some point. Buffer.from()? https://nodejs.org/api/buffer.html
         letter.filename =
@@ -71,17 +70,15 @@ async function readAttachments(page, letters, processedLetters) {
         console.error('Aw dang: ' + e);
         reject(e); // TODO: Handle.
       });
-    }));
+    });
   }
-  return requests;
 }
 
 async function sendEmail(letters, processedLetters) {
-  const requests = [];
-  // TODO: Expose more mail server config.
   let transport = null;
-  // Send oldest letters first, i.e. maintain chronological order.
-  // TODO: This is not reliable. Forge date instead.
+  // Send oldest letters first, i.e. maintain chronological order. This is not reliable because
+  // emails race, but GMail ignores the carefully forged message creation date (it shows the
+  // reception date instead), so it's the best we can do.
   for (const letter of letters.reverse()) {
     if (letter.id in processedLetters) {
       continue;
@@ -103,6 +100,7 @@ async function sendEmail(letters, processedLetters) {
       ];
     }
     if (!transport) {
+      // TODO: Expose more mail server config.
       transport = nodemailer.createTransport({
         host: CONFIG.email.server,
         port: 465,
@@ -113,10 +111,11 @@ async function sendEmail(letters, processedLetters) {
         }
       });
     } else {
+      // Throttle outgoing emails.
       await new Promise(f => setTimeout(f, CONFIG.email.waitSeconds * 1000));
     }
     console.log('Sending email "' + letter.subject + '"');
-    requests.push(new Promise((resolve, reject) => {
+    await new Promise((resolve, reject) => {
       transport.sendMail(email, (error, info) => {
         if (error) {
           console.log('Failed to send email: ' + error); // TODO: Handle.
@@ -127,9 +126,8 @@ async function sendEmail(letters, processedLetters) {
           resolve(null);
         }
       });
-    }));
+    });
   }
-  return requests;
 }
 
 async function getPhpSessionIdAsCookie(page) {
@@ -145,9 +143,8 @@ async function getPhpSessionIdAsCookie(page) {
 
   await login(page);
   const letters = await readLetters(page); // Always reads all.
-  // TODO: Handle errors.
-  await Promise.all(await readAttachments(page, letters, processedItems.letters));
-  await Promise.all(await sendEmail(letters, processedItems.letters));
+  await readAttachments(page, letters, processedItems.letters);
+  await sendEmail(letters, processedItems.letters);
   await browser.close();
   fs.writeFileSync(PROCESSED_ITEMS_FILE, JSON.stringify(processedItems, null, 2));
 })();
