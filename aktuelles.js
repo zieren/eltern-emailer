@@ -1,3 +1,5 @@
+/* global Buffer, Promise */
+
 const contentDisposition = require('content-disposition');
 const https = require('https');
 const fs = require('fs');
@@ -5,6 +7,7 @@ const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
 
 const CONFIG = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
+const PROCESSED_ITEMS_FILE = 'processed.json';
 
 async function login(page) {
   console.log('Logging in');
@@ -21,91 +24,109 @@ async function readLetters(page) {
   console.log('Reading letters');
   await page.goto(CONFIG.elternportal.url + '/aktuelles/elternbriefe');
   const lettersList = await page.$$eval(
-    '.link_nachrichten',
+    'span.link_nachrichten, a.link_nachrichten',
     (nodes) => nodes.map(
       (n) => {
-        const letter = {};
-        if (n.tagName === 'SPAN') {
-          letter.subject = n.firstChild.textContent;
-        } else {
-          letter.subject = n.textContent;
-          letter.url = n.href;
-        }
-        letter.body = n.parentElement.outerText.substring(n.outerText.length).trim();
-        letter.id =
-            n.parentElement.parentElement.previousElementSibling.firstChild.textContent.trim();
-        return letter;
+        return {
+          // Use the ID also used for reading confirmation, because it should be stable.
+          id: n.attributes.onclick.textContent.match(/\(([0-9]+)\)/)[1],
+          body: n.parentElement.outerText.substring(n.outerText.length).trim(),
+          subject: n.tagName === 'A' ? n.textContent : n.firstChild.textContent,
+          url: n.tagName === 'A' ? n.href : null
+        };
       }));
   console.log('Letters: ' + lettersList.length);
   const letters = {};
-  lettersList.forEach((l) => {
-    letters[l.id] = l;
-    delete l.id;
+  lettersList.forEach((letter) => {
+    letters[letter.id] = letter;
+    delete letter.id;
   });
   return letters;
 }
 
-async function readAttachments(page, letters, skipIDs) {
+async function readAttachments(page, letters, processedLetters) {
   console.log('Reading attachments');
-  const cookies = await page.cookies();
-  console.log('Cookies: ' + JSON.stringify(cookies, null, 2));
-  var options = {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
+  const requests = [];
+  const options = {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
   for (const [id, letter] of Object.entries(letters)) {
-    if (id in skipIDs || !('url' in letter)) {
+    if (id in processedLetters || !letter.url) {
       continue;
     }
-    console.log('Reading attachment for: ' + letter.subject);
-    // TODO: Do we need to throttle here? Maybe simply wait a few seconds?
-    const transport = nodemailer.createTransport({
-      host: CONFIG.email.server,
-      port: 465,
-      secure: true,
-      auth: {
-        user: CONFIG.email.username,
-        pass: CONFIG.email.password
-      }
-    });
-    // Collect buffers and use Buffer.concat() to avoid chunk sizes arithmetics.
+    // Collect buffers and use Buffer.concat() to avoid messing with chunk size arithmetics.
     let buffers = [];
-    https.get(letter.url, options, (response) => {
-      console.log('statusCode:', response.statusCode); // TODO: Handle.
-      console.log('headers:', response.headers);
-      // TODO: Decode UTF8 at some point. Buffer.from()? https://nodejs.org/api/buffer.html
-      letter.filename =
-          contentDisposition.parse(response.headers['content-disposition']).parameters.filename;
-      response.on('data', (d) => {
-        buffers.push(d);
-      }).on('end', () => {
-        letter.content = Buffer.concat(buffers);
-        console.log('attachment: ' + letter.content.length);
-        const email = {
-          from: CONFIG.email.from,
-          to: CONFIG.email.to,
-          subject: letter.subject,
-          text: letter.body,
-          attachments: [
-            {
-              filename: letter.filename,
-              content: letter.content
-            }
-          ]
-        };
-        transport.sendMail(email, function(error, info) {
-          if (error) {
-            console.log('Failed to send email: ' + error);
-          } else {
-            console.log('Email sent: ' + info.response);
-          }
+    // It seems attachment downloads don't need to be throttled.
+    requests.push(new Promise((resolve, reject) => {
+      https.get(letter.url, options, (response) => {
+        // TODO: Decode UTF8 at some point. Buffer.from()? https://nodejs.org/api/buffer.html
+        letter.filename =
+            contentDisposition.parse(response.headers['content-disposition']).parameters.filename;
+        response.on('data', (buffer) => {
+          buffers.push(buffer);
+        }).on('end', () => {
+          letter.content = Buffer.concat(buffers);
+          console.log(
+              'Read attachment (' + letter.content.length + ' bytes) for: ' + letter.subject);
+          resolve(null);
         });
-
-
+      }).on('error', (e) => {
+        console.error('Aw dang: ' + e);
+        reject(e); // TODO: Handle.
       });
-    }).on('error', (e) => {
-      console.error('Aw dang: ' + e); // TODO: Handle.
-    });
+    }));
+  }
+  return requests;
+}
 
-    break; // TODO
-  };
+async function sendEmail(letters, processedLetters) {
+  const requests = [];
+  // TODO: Expose more mail server config.
+  let transport = null;
+  for (const [id, letter] of Object.entries(letters)) {
+    if (id in processedLetters) {
+      continue;
+    }
+    const email = {
+      from: CONFIG.email.from + ' (Elternportal - Aktuelles)',
+      to: CONFIG.email.to,
+      subject: letter.subject,
+      text: letter.body
+    };
+    if (letter.content) {
+      email.attachments = [
+        {
+          filename: letter.filename,
+          content: letter.content
+        }
+      ];
+    }
+    if (!transport) {
+      transport = nodemailer.createTransport({
+        host: CONFIG.email.server,
+        port: 465,
+        secure: true,
+        auth: {
+          user: CONFIG.email.username,
+          pass: CONFIG.email.password
+        }
+      });
+    } else {
+      await new Promise(f => setTimeout(f, CONFIG.email.waitSeconds * 1000));
+    }
+    console.log('Sending email "' + letter.subject + '"');
+    requests.push(new Promise((resolve, reject) => {
+      transport.sendMail(email, (error, info) => {
+        if (error) {
+          console.log('Failed to send email: ' + error); // TODO: Handle.
+          reject(error);
+        } else {
+          console.log('Email sent: ' + info.response);
+          processedLetters[id] = 1;
+          resolve(null);
+        }
+      });
+    }));
+  }
+  return requests;
 }
 
 async function getPhpSessionIdAsCookie(page) {
@@ -115,12 +136,15 @@ async function getPhpSessionIdAsCookie(page) {
 }
 
 (async () => {
+  const processedItems = JSON.parse(fs.readFileSync(PROCESSED_ITEMS_FILE, 'utf-8'));
   const browser = await puppeteer.launch();
   const page = await browser.newPage();
 
   await login(page);
-  const letters = await readLetters(page);
-  console.log(JSON.stringify(letters, null, 2));
-  await readAttachments(page, letters, {}); // TODO: Skip IDs.
+  const letters = await readLetters(page); // Always reads all.
+  // TODO: Handle errors.
+  await Promise.all(await readAttachments(page, letters, processedItems.letters));
+  await Promise.all(await sendEmail(letters, processedItems.letters));
   await browser.close();
+  fs.writeFileSync(PROCESSED_ITEMS_FILE, JSON.stringify(processedItems, null, 2));
 })();
