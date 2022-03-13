@@ -1,3 +1,5 @@
+/* global Promise */
+
 const fs = require('fs');
 const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
@@ -108,7 +110,7 @@ async function readThreadsContents(page, threads) {
     const messages = thread.messages;
     const nCurrent = messages.length;
     if (nCurrent <= nPrevious) {
-      // If messages are ever deleted, we'd need to hash because n could remain constant or
+      // If messages can ever be deleted, we'd need to hash because n could remain constant or
       // decrease even when new messages are present.
       continue;
     };
@@ -121,8 +123,7 @@ async function readThreadsContents(page, threads) {
       });
     }
   };
-  // TODO: This runs the risk of flooding. Emails should be throttled. Possibly helpful:
-  // https://www.npmjs.com/package/quota
+  // TODO: Bundle this with aktuelles.js.
   if (emails.length) {
     console.log('Emailing new messages');
     const transport = nodemailer.createTransport({
@@ -135,8 +136,9 @@ async function readThreadsContents(page, threads) {
       }
     });
     for (let i = 0; i < emails.length; ++i) {
-      console.log(JSON.stringify(emails[i], null, 2));
-      // TODO: Do we need to throttle these? Maybe simply wait a few seconds?
+      if (i) {
+        await new Promise(r => setTimeout(r, CONFIG.email.waitSeconds * 1000));
+      }
       transport.sendMail(emails[i], function(error, info) {
         if (error) {
           console.log('Failed to send email: ' + error);
