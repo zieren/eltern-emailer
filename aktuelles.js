@@ -97,7 +97,7 @@ function buildEmailsForLetters(letters, processedLetters) {
       .reverse()
       .map(letter => {
         const email = {
-          from: CONFIG.email.from + ' (Elternportal - Aktuelles)',
+          from: buildFrom('Aktuelles'),
           to: CONFIG.email.to,
           subject: letter.subject,
           text: letter.body,
@@ -132,7 +132,7 @@ async function readActiveTeachers(page) {
         };
       }));
   console.log('Active teachers: ' + teachers.length);
-  return [teachers[0]];//TODO;
+  return [teachers[1]];//TODO;
 }
 
 // TODO: Fold this into readActiveTeachers()? Does $$eval() support that?
@@ -164,13 +164,12 @@ async function readThreadsContents(page, teachers) {
   console.log('Reading thread contents');
   for (const teacher of teachers) {
     for (const thread of teacher.threads) {
-      await page.goto(thread.url + '?load_all=1'); // Prevent pagination.
-      thread.messages = await page.$$eval(
-          'div.arch_kom',
-          (divs) => divs.map((d) => {
+      await page.goto(thread.url + '?load_all=1'); // Prevent pagination (I hope).
+      thread.messages = await page.$eval('div#last_messages',
+          (div) => Array.from(div.children).map(row => {
             return {
-              author: d.parentElement.parentElement.firstChild.textContent,
-              body: d.textContent
+              author: row.firstChild.firstChild.textContent,
+              body: row.children[1].firstChild.textContent
             };
           }));
       console.log(thread.messages.length + ' messages in "'+ thread.subject + '"');
@@ -188,22 +187,26 @@ function buildEmailsForThreads(teachers, processedThreads) {
       // If messages can ever be deleted, we'd need to hash because n could remain constant or even
       // decrease when messages disappear.
       for (let i = 0; i < thread.messages.length; ++i) {
-        // TODO: This yields " (Elternportal - Borchard Annette:(02.02.2022) )"
-        // -> Author is available, fix retrieval.
-        console.log(' (Elternportal - ' + thread.messages[i].author + ')'); // TODO
-        emails.push({
-          email: {
-            from: CONFIG.email.from,
-            to: CONFIG.email.to,
-            subject: thread.subject,
-            text: thread.messages[i].body
-          },
-          ok: () => { processedThreads[thread.id][i] = 1; }
-        });
+        if (!(i in processedThreads[thread.id])) {
+          emails.push({
+            email: {
+              from: buildFrom(thread.messages[i].author),
+              to: CONFIG.email.to,
+              subject: thread.subject,
+              text: thread.messages[i].body
+            },
+            ok: () => { processedThreads[thread.id][i] = 1; }
+          });
+        }
       }
-    };
+    }
   }
+  // TODO: ö Threads are currently processed in reverse chronological order, but should be forward.
   return emails;
+}
+
+function buildFrom(name) {
+  return '"Elternportal - ' + name.replace('"', '') + '" <' + CONFIG.email.from + '>';
 }
 
 async function sendEmails(emails) {
