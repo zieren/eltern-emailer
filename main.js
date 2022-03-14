@@ -180,12 +180,14 @@ async function readThreadsContents(page, teachers) {
 function buildEmailsForThreads(teachers, processedThreads, emails) {
   for (const teacher of teachers) {
     for (const thread of teacher.threads) {
+      // If messages can ever be deleted, we'd need to hash because n could remain constant or even
+      // decrease when messages disappear.
       if (!(thread.id in processedThreads)) {
         processedThreads[thread.id] = {};
       }
-      // If messages can ever be deleted, we'd need to hash because n could remain constant or even
-      // decrease when messages disappear.
-      for (let i = 0; i < thread.messages.length; ++i) {
+      // Messages are in reverse chronological order, so process backwards to send in forward
+      // chronological order.
+      for (let i = thread.messages.length - 1; i >= 0 ; --i) {
         if (!(i in processedThreads[thread.id])) {
           const email = {
             from: buildFrom(thread.messages[i].author),
@@ -206,7 +208,6 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
       }
     }
   }
-  // TODO: ö Threads are currently processed in reverse chronological order, but should be forward.
   return emails;
 }
 
@@ -219,10 +220,10 @@ function buildMessageId(threadId, i) {
 }
 
 async function sendEmails(emails) {
+  console.log('Sending ' + emails.length + ' emails');
   if (!emails.length) {
     return;
   }
-  console.log('Sending ' + emails.length + ' emails');
   // TODO: Expose more mail server config.
   const transport = nodemailer.createTransport({
     host: CONFIG.email.server,
