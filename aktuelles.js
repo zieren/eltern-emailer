@@ -132,7 +132,7 @@ async function readActiveTeachers(page) {
         };
       }));
   console.log('Active teachers: ' + teachers.length);
-  return [teachers[1]];//TODO;
+  return teachers;
 }
 
 // TODO: Fold this into readActiveTeachers()? Does $$eval() support that?
@@ -177,8 +177,7 @@ async function readThreadsContents(page, teachers) {
   }
 }
 
-function buildEmailsForThreads(teachers, processedThreads) {
-  const emails = [];
+function buildEmailsForThreads(teachers, processedThreads, emails) {
   for (const teacher of teachers) {
     for (const thread of teacher.threads) {
       if (!(thread.id in processedThreads)) {
@@ -188,13 +187,19 @@ function buildEmailsForThreads(teachers, processedThreads) {
       // decrease when messages disappear.
       for (let i = 0; i < thread.messages.length; ++i) {
         if (!(i in processedThreads[thread.id])) {
+          const email = {
+            from: buildFrom(thread.messages[i].author),
+            to: CONFIG.email.to,
+            messageId: buildMessageId(thread.id, i),
+            subject: thread.subject,
+            text: thread.messages[i].body
+          };
+          if (i > 0) {
+            email.references = [buildMessageId(thread.id, i - 1)];
+          }
           emails.push({
-            email: {
-              from: buildFrom(thread.messages[i].author),
-              to: CONFIG.email.to,
-              subject: thread.subject,
-              text: thread.messages[i].body
-            },
+            // We don't forge the date here because time of day is not available.
+            email: email,
             ok: () => { processedThreads[thread.id][i] = 1; }
           });
         }
@@ -206,13 +211,18 @@ function buildEmailsForThreads(teachers, processedThreads) {
 }
 
 function buildFrom(name) {
-  return '"Elternportal - ' + name.replace('"', '') + '" <' + CONFIG.email.from + '>';
+  return '"EP - ' + name.replace('"', '') + '" <' + CONFIG.email.from + '>';
+}
+
+function buildMessageId(threadId, i) {
+  return threadId + '.' + i + '.eltern-emailer@' + CONFIG.email.from.replace(/.*@/, '');
 }
 
 async function sendEmails(emails) {
   if (!emails.length) {
     return;
   }
+  console.log('Sending ' + emails.length + ' emails');
   // TODO: Expose more mail server config.
   const transport = nodemailer.createTransport({
     host: CONFIG.email.server,
@@ -262,16 +272,16 @@ async function getPhpSessionIdAsCookie(page) {
   await login(page);
 
   // Section "Aktuelles".
-//  const letters = await readLetters(page); // Always reads all.
-//  await readAttachments(page, letters, processedItems.letters);
-//  const emails = buildEmailsForLetters(letters, processedItems.letters);
-//  await sendEmails(emails);
+  const letters = await readLetters(page); // Always reads all.
+  await readAttachments(page, letters, processedItems.letters);
+  const emails = buildEmailsForLetters(letters, processedItems.letters);
 
   // Section "Kommunikation Eltern/Fachlehrer".
   const teachers = await readActiveTeachers(page);
   await readThreadsMeta(page, teachers);
   await readThreadsContents(page, teachers);
-  const emails = buildEmailsForThreads(teachers, processedItems.threads);
+  buildEmailsForThreads(teachers, processedItems.threads, emails);
+
   await sendEmails(emails);
 
   await browser.close();
