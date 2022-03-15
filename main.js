@@ -9,33 +9,20 @@ const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
 const winston = require('winston');
 
-// Read config.
-const CONFIG_FILE = process.argv[2] || 'config.json';
-const CONFIG = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
-if (CONFIG.epLogin.url.startsWith('https://SCHOOL.')) {
-  throw 'Please edit the config file to specify your login credentials, SMTP server etc.';
-}
-
-// Set up logging.
-const logFormat = winston.format.printf(({level, message, timestamp}) => {
-  return `${timestamp} ${level}: ${message}`;
-});
-const logger = winston.createLogger({
-  level: CONFIG.options.logLevel,
-  format: winston.format.combine(
-    winston.format.splat(),
-    winston.format.timestamp(),
-    logFormat
-  ),
-  transports: [
-    new winston.transports.File({
-      filename: 'eltern-emailer.log',
-      maxsize: 10 << 20,
-      maxFiles: 2
-    }),
-    new winston.transports.Console()
+const CLI_OPTIONS = {
+  args: [],
+  flags: [
+    {
+      name: 'config',
+      type: 'string',
+      default: 'config.json'
+    }
   ]
-});
+};
+
+// Initialized in main() after parsing CLI flags.
+let CONFIG = {};
+let LOG = null;
 
 /**
  * List of already processed (i.e. emailed) items. Contains the following keys:
@@ -57,7 +44,7 @@ async function login(page) {
   if (!success) {
     throw 'Login failed';
   }
-  logger.info('Login OK');
+  LOG.info('Login OK');
 }
 
 /** Reads all letters, but not possible attachments. */
@@ -79,7 +66,7 @@ async function readLetters(page) {
           dateString: d[3] + '-' + d[2] + '-' + d[1] + ' ' + d[4]
         };
       }));
-  logger.info('Found %d letters', letters.length);
+  LOG.info('Found %d letters', letters.length);
   return letters;
 }
 
@@ -104,7 +91,7 @@ async function readAttachments(page, letters, processedLetters) {
           buffers.push(buffer);
         }).on('end', () => {
           letter.content = Buffer.concat(buffers);
-          logger.info('Read attachment (%d bytes) for: %s', letter.content.length, letter.subject);
+          LOG.info('Read attachment (%d bytes) for: %s', letter.content.length, letter.subject);
           resolve(null);
         });
       }).on('error', (e) => {
@@ -124,7 +111,7 @@ function buildEmailsForLetters(letters, processedLetters) {
       .map(letter => {
         const email = {
           from: buildFrom('Aktuelles'),
-          to: CONFIG.email.to,
+          to: CONFIG.smtp.to,
           subject: letter.subject,
           text: letter.body,
           date: new Date(letter.dateString)
@@ -157,7 +144,7 @@ async function readActiveTeachers(page) {
           name: a.parentElement.parentElement.firstChild.textContent
         };
       }));
-  logger.info('Found %d threads', teachers.length);
+  LOG.info('Found %d threads', teachers.length);
   return teachers;
 }
 
@@ -167,7 +154,7 @@ async function readActiveTeachers(page) {
  */
 async function readThreadsMeta(page, teachers) {
   for (const teacher of teachers) {
-    logger.debug('Reading threads with %s', teacher.name);
+    LOG.debug('Reading threads with %s', teacher.name);
     await page.goto(teacher.url);
     teacher.threads = await page.$$eval(
         'a[href*="meldungen/kommunikation_fachlehrer/"',
@@ -196,7 +183,7 @@ async function readThreadsContents(page, teachers) {
               body: row.children[1].firstChild.textContent
             };
           }));
-      logger.debug(
+      LOG.debug(
           'Read %d messages in "%s" with %s', thread.messages.length, thread.subject, teacher.name);
     }
   }
@@ -216,7 +203,7 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
         if (!(i in processedThreads[thread.id])) {
           const email = {
             from: buildFrom(thread.messages[i].author),
-            to: CONFIG.email.to,
+            to: CONFIG.smtp.to,
             messageId: buildMessageId(thread.id, i),
             subject: thread.subject,
             text: thread.messages[i].body
@@ -237,11 +224,11 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
 }
 
 function buildFrom(name) {
-  return '"EP - ' + name.replace('"', '') + '" <' + CONFIG.email.from + '>';
+  return '"EP - ' + name.replace('"', '') + '" <' + CONFIG.smtp.from + '>';
 }
 
 function buildMessageId(threadId, i) {
-  return threadId + '.' + i + '.eltern-emailer@' + CONFIG.email.from.replace(/.*@/, '');
+  return threadId + '.' + i + '.eltern-emailer@' + CONFIG.smtp.from.replace(/.*@/, '');
 }
 
 async function sleepSeconds(seconds) {
@@ -249,39 +236,39 @@ async function sleepSeconds(seconds) {
 }
 
 async function sendEmails(emails) {
-  logger.info('Sending %d emails', emails.length);
+  LOG.info('Sending %d emails', emails.length);
   if (!emails.length) {
     return;
   }
   // TODO: Expose more mail server config.
   const transport = nodemailer.createTransport({
-    host: CONFIG.email.server,
+    host: CONFIG.smtp.server,
     port: 465,
     secure: true,
     auth: {
-      user: CONFIG.email.username,
-      pass: CONFIG.email.password
+      user: CONFIG.smtp.username,
+      pass: CONFIG.smtp.password
     }
   });
   let first = true;
   for (const e of emails) {
     if (CONFIG.options.dontSendEmail) {
-      logger.info('Not sending email "%s"', e.email.subject);
+      LOG.info('Not sending email "%s"', e.email.subject);
       e.ok();
       continue;
     }
     // Throttle outgoing emails.
     if (!first) {
-      await sleepSeconds(CONFIG.email.waitSeconds);
+      await sleepSeconds(CONFIG.smtp.waitSeconds);
     }
     first = false;
-    logger.info('Sending email "%s"', e.email.subject);
+    LOG.info('Sending email "%s"', e.email.subject);
     await new Promise((resolve, reject) => {
       transport.sendMail(e.email, (error, info) => {
         if (error) {
           reject(error);
         } else {
-          logger.debug('Email sent (%s)', info.response);
+          LOG.debug('Email sent (%s)', info.response);
           e.ok();
           resolve(null);
         }
@@ -301,13 +288,44 @@ async function getPhpSessionIdAsCookie(page) {
   return id[0].name + '=' + id[0].value;
 }
 
-(async () => {
+async function main() {
+  const parser = await import('args-and-flags').then(aaf => {
+    return new aaf.default(CLI_OPTIONS);
+  });
+  const { args, flags } = parser.parse(process.argv.slice(2));
+
+  // Read config.
+  CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
+  if (CONFIG.epLogin.url.startsWith('https://SCHOOL.')) {
+    throw 'Please edit the config file to specify your login credentials, SMTP server etc.';
+  }
+
+  // Set up logging.
+  LOG = winston.createLogger({
+    level: CONFIG.options.logLevel,
+    format: winston.format.combine(
+      winston.format.splat(),
+      winston.format.timestamp(),
+      winston.format.printf(({level, message, timestamp}) => {
+        return `${timestamp} ${level}: ${message}`;
+      })
+    ),
+    transports: [
+      new winston.transports.File({
+        filename: 'eltern-emailer.log',
+        maxsize: 10 << 20,
+        maxFiles: 2
+      }),
+      new winston.transports.Console()
+    ]
+  });
+
   while (true) {
     try {
       const state = fs.existsSync(STATE_FILE)
           ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
           : {threads: {}, letters: {}};
-      logger.debug('Read state: %d threads, %d letters',
+      LOG.debug('Read state: %d threads, %d letters',
           Object.keys(state.threads).length, Object.keys(state.letters).length);
       const browser = await puppeteer.launch();
       const page = await browser.newPage();
@@ -330,10 +348,12 @@ async function getPhpSessionIdAsCookie(page) {
       await browser.close();
       fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
     } catch (e) {
-      logger.error('Exiting: %s', e);
+      LOG.error('Exiting: %s', e);
       throw e; // TODO: Figure out how to exit cleanly.
     }
-    logger.debug('Waiting %d minutes until next check', CONFIG.options.pollingIntervalMinutes);
+    LOG.debug('Waiting %d minutes until next check', CONFIG.options.pollingIntervalMinutes);
     await sleepSeconds(CONFIG.options.pollingIntervalMinutes * 60);
   }
-})();
+};
+
+main();
