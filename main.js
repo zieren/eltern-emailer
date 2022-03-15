@@ -69,7 +69,6 @@ async function readAttachments(page, letters, processedLetters) {
     // It seems attachment downloads don't need to be throttled.
     await new Promise((resolve, reject) => {
       https.get(letter.url, options, (response) => {
-        // TODO: Decode UTF8 at some point. Buffer.from()? https://nodejs.org/api/buffer.html
         letter.filename =
             contentDisposition.parse(response.headers['content-disposition']).parameters.filename;
         response.on('data', (buffer) => {
