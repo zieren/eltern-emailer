@@ -1,4 +1,4 @@
-/* global Buffer, Promise */
+/* global Buffer, Promise, process */
 
 // TODO: "letters" -> "announcements"? "news"?
 
@@ -8,8 +8,14 @@ const fs = require('fs');
 const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
 
+const CONFIG_FILE = process.argv[2] || 'config.json';
+
 /** Our config. */
-const CONFIG = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
+const CONFIG = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+
+if (CONFIG.epLogin.url.startsWith('https://SCHOOL.')) {
+  throw 'Please edit the config file to specify your login credentials, SMTP server etc.';
+}
 
 /**
  * List of already processed (i.e. emailed) items. Contains the following keys:
@@ -172,7 +178,8 @@ async function readThreadsContents(page, teachers) {
               body: row.children[1].firstChild.textContent
             };
           }));
-      console.log(thread.messages.length + ' messages in "'+ thread.subject + '"');
+      console.log(
+          thread.messages.length + ' messages in "'+ thread.subject + '" with ' + teacher.name);
     }
   }
 }
@@ -236,6 +243,11 @@ async function sendEmails(emails) {
   });
   let first = true;
   for (const e of emails) {
+    if (CONFIG.options.dontSendEmail) {
+      console.log('Not sending email "' + e.email.subject + '"');
+      e.ok();
+      continue;
+    }
     // Throttle outgoing emails.
     if (!first) {
       await new Promise(f => setTimeout(f, CONFIG.email.waitSeconds * 1000));
