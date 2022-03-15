@@ -10,12 +10,13 @@ const puppeteer = require('puppeteer');
 
 /** Our config. */
 const CONFIG = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
+
 /**
  * List of already processed (i.e. emailed) items. Contains the following keys:
  * - 'letters': Letters in "Aktuelles".
  * - 'threads': Threads in "Kommunikation Eltern/Fachlehrer".
  */
-const PROCESSED_ITEMS_FILE = 'processed.json';
+const STATE_FILE = 'state.json';
 
 /** This function does the thing. The login thing. You know? */
 async function login(page) {
@@ -265,7 +266,7 @@ async function getPhpSessionIdAsCookie(page) {
 }
 
 (async () => {
-  const processedItems = JSON.parse(fs.readFileSync(PROCESSED_ITEMS_FILE, 'utf-8'));
+  const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
   const browser = await puppeteer.launch();
   const page = await browser.newPage();
 
@@ -273,17 +274,17 @@ async function getPhpSessionIdAsCookie(page) {
 
   // Section "Aktuelles".
   const letters = await readLetters(page); // Always reads all.
-  await readAttachments(page, letters, processedItems.letters);
-  const emails = buildEmailsForLetters(letters, processedItems.letters);
+  await readAttachments(page, letters, state.letters);
+  const emails = buildEmailsForLetters(letters, state.letters);
 
   // Section "Kommunikation Eltern/Fachlehrer".
   const teachers = await readActiveTeachers(page);
   await readThreadsMeta(page, teachers);
   await readThreadsContents(page, teachers);
-  buildEmailsForThreads(teachers, processedItems.threads, emails);
+  buildEmailsForThreads(teachers, state.threads, emails);
 
   await sendEmails(emails);
 
   await browser.close();
-  fs.writeFileSync(PROCESSED_ITEMS_FILE, JSON.stringify(processedItems, null, 2));
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 })();
