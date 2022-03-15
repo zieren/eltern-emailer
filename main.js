@@ -248,6 +248,7 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
           const email = {
             from: buildFrom(thread.messages[i].author),
             to: CONFIG.smtp.to,
+            // TODO: Consider enriching this, see TODO for other messageId.
             messageId: buildMessageId(thread.id, i),
             subject: thread.subject,
             text: thread.messages[i].body
@@ -336,6 +337,8 @@ function buildEmailsForProphecies(prophecies, processedProphecies, emails) {
         from: buildFrom(PROPHECY_AUTHOR[Math.min(j, 2)]),
         to: CONFIG.smtp.to,
         messageId: buildMessageId('prophecy.' + i, j), // TODO: Unhack.
+        // TODO: ^^ What if these are cleared after the school year, and indexes start at 0 again?
+        // Maybe include a hash of the subject, or the date, to avoid collisions.
         subject: prophecy.subject,
         text: prophecy.messages[j]
       };
