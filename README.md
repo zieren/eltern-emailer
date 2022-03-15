@@ -3,20 +3,21 @@
 Unofficial email interface for `*.eltern-portal.org` sites: Retrieves messages from the web and
 emails them to you. This saves time, enables text search and integrates with email based workflows.
 
+## Project Status
+
+This project is in alpha state.
+
 ## How it Works
 
-Eltern-Emailer logs into the Eltern-Portal website and checks for new content in certain
-[categories](#current-features), e.g. `Aktuelles`. It then sends this content to you via email.
+Eltern-Emailer logs into the Eltern-Portal website and checks for new content in certain 
+[categories](#current-features), e.g. news in `Aktuelles` or messages from teachers in 
+`Kommunikation Eltern/Fachlehrer`. It then sends this content to you via email.
 
 The application does not interact with any third parties except your email provider. It runs on 
 your own desktop or server.
 
 Currently only timed polling is supported. Event-based polling (triggered by the notification email)
 is [planned](#planned-features).
-
-## Project Status
-
-This project is in alpha state.
 
 ### Requirements
 
@@ -32,8 +33,6 @@ The following information sources (sections in the web UI) are supported:
 
 * `Aktuelles`
 * `Kommunikation Eltern/Fachlehrer`
-
-(I know, only two. That's why it's in alpha state.)
 
 ### Planned Features
 
@@ -61,7 +60,7 @@ Other planned features:
    ```
    npm install args-and-flags content-disposition nodemailer puppeteer winston
    ```
-   This downloads 400+MB. You can continue with the next steps in the meanwhile.
+   This downloads 400+MB. You can continue with the next step in the meanwhile.
 1. Edit the file `config.json` to specify your login credentials, SMTP server etc. All uppercase
    parts need to be replaced. If you don't want to store credentials in a file you can pass them
    via commandline flags (see [Flags](#flags)).
@@ -73,14 +72,14 @@ new content (because that is reset when you log in manually, and it's also not s
 types of content). Instead it uses a file called `state.json` to remember which content has already
 been emailed and detect which is new.
 
-Initially this file is empty and all content will appear new. If you don't want to get flooded with
-emails for all existing content, run Eltern-Emailer once with these [flags](#flags):
+Initially this file does not exist and all content will appear new. If you don't want to get 
+flooded with emails for all existing content, run Eltern-Emailer once with these [flags](#flags):
 
 ```
 node main.js --mute --once
 ```
 
-This should print no errors. After it has succeeded there should be a `state.json` file that looks something like this:
+This should print no errors. After it has succeeded there should be a `state.json` file that looks something like this (but likely longer):
 
 ```
 {
@@ -103,9 +102,7 @@ This should print no errors. After it has succeeded there should be a `state.jso
 }
 ```
 
-Use your platform's automation (Task Scheduler on Windows, cron on Linux) to
-run Eltern-Emailer as desired. You can have it started once and use its own polling interval
-management:
+Now use your platform's automation (Task Scheduler on Windows, cron on Linux) to have it run Eltern-Emailer as desired. You can start it once and use its own polling interval management:
 
 ```
 node main.js
@@ -118,6 +115,9 @@ Alternatively you can pass the `--once` [flag](#flags) and have the automation h
 ```
 node main.js --once
 ```
+
+To try it out, manually remove one line in `state.json`, e.g. the first line after `"letters":`.
+This should trigger an email to you on the next run.
 
 ## Flags
 
