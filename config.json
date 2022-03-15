@@ -13,7 +13,7 @@
     "waitSeconds": 5
   },
   "options": {
-    "pollingIntervalMinutes": 10,
+    "pollingIntervalMinutes": 30,
     "logLevel": "debug"
  }
 }
