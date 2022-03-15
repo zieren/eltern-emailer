@@ -112,7 +112,7 @@ async function readAttachments(page, letters, processedLetters) {
           buffers.push(buffer);
         }).on('end', () => {
           letter.content = Buffer.concat(buffers);
-          LOG.info('Read attachment (%d bytes) for: %s', letter.content.length, letter.subject);
+          LOG.info('Read attachment (%d kb) for: %s', letter.content.length >> 10, letter.subject);
           resolve(null);
         });
       }).on('error', (e) => {
@@ -345,7 +345,7 @@ async function main() {
   });
 
   LOG.info(TITLE);
-  
+
   try {
     // Ensure config file has been edited.
     if (CONFIG.epLogin.url.startsWith('https://SCHOOL.')) {
