@@ -47,6 +47,7 @@ know or, even better, contribute code.
 Other planned features:
 
 * Check for the portal's notification email instead of polling every N minutes.
+* Forward email sent to Eltern-Emailer to a teacher via the form on the website
 * Run on a Raspberry Pi.
 
 ## Installation
