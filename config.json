@@ -4,7 +4,7 @@
     "email": "EMAIL@ADDRESS",
     "password": "PASSWORD"
   },
-  "email": {
+  "smtp": {
     "server": "SMTP.SERVER",
     "username": "SMTP_USERNAME",
     "password": "SMTP_PASSWORD",
