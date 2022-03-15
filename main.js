@@ -2,7 +2,7 @@
 
 // TODO: "letters" -> "announcements"? "news"?
 
-const TITLE = 'Eltern-Emailer 0.0.1 (c) 2022 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.0.1+ (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
@@ -41,6 +41,8 @@ const CLI_OPTIONS = {
   ]
 };
 
+const PROPHECY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
+
 // Initialized in main() after parsing CLI flags.
 let CONFIG = {};
 let LOG = null;
@@ -66,6 +68,27 @@ async function login(page) {
     throw 'Login failed';
   }
   LOG.info('Login OK');
+}
+
+async function getPhpSessionIdAsCookie(page) {
+  const cookies = await page.cookies();
+  const id = cookies.filter(c => c.name === "PHPSESSID");
+  if (id.length !== 1) {
+    throw 'Failed to extract PHPSESSID';
+  }
+  return id[0].name + '=' + id[0].value;
+}
+
+function buildFrom(name) {
+  return '"EP - ' + name.replace('"', '') + '" <' + CONFIG.smtp.from + '>';
+}
+
+function buildMessageId(threadId, i) {
+  return threadId + '.' + i + '.eltern-emailer@' + CONFIG.smtp.from.replace(/.*@/, '');
+}
+
+async function sleepSeconds(seconds) {
+  await new Promise(f => setTimeout(f, seconds * 1000));
 }
 
 /** Reads all letters, but not possible attachments. */
@@ -244,18 +267,6 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
   return emails;
 }
 
-function buildFrom(name) {
-  return '"EP - ' + name.replace('"', '') + '" <' + CONFIG.smtp.from + '>';
-}
-
-function buildMessageId(threadId, i) {
-  return threadId + '.' + i + '.eltern-emailer@' + CONFIG.smtp.from.replace(/.*@/, '');
-}
-
-async function sleepSeconds(seconds) {
-  await new Promise(f => setTimeout(f, seconds * 1000));
-}
-
 async function sendEmails(emails) {
   LOG.info('Sending %d emails', emails.length);
   if (!emails.length) {
@@ -298,15 +309,46 @@ async function sendEmails(emails) {
   }
 }
 
-// ----- Kommunikation Eltern/Fachlehrer -----
-
-async function getPhpSessionIdAsCookie(page) {
-  const cookies = await page.cookies();
-  const id = cookies.filter(c => c.name === "PHPSESSID");
-  if (id.length !== 1) {
-    throw 'Failed to extract PHPSESSID';
+/** Reads messages to/from "Klassenleitung". Each thread has at most two messages. */
+async function readProphecies(page) {
+  await page.goto(CONFIG.epLogin.url + '/meldungen/kommunikation');
+  const prophecies = await page.$$eval(
+    'h3.panel-title', (headings) => headings.map((h) => {return {subject: h.textContent};}));
+  for (let i = 0; i < prophecies.length; ++i) {
+    prophecies[i].messages = await page.$eval('div#bear_' + i,
+        (div) => Array.from(div.firstElementChild.childNodes)
+            .filter(c => c.nodeName === '#text')
+            .map(c => c.textContent));
   }
-  return id[0].name + '=' + id[0].value;
+  // Order is reverse chronological, make it forward.
+  return prophecies.reverse();
+  LOG.info('Found %d prophecies', prophecies.length());
+}
+
+function buildEmailsForProphecies(prophecies, processedProphecies, emails) {
+  for (const [i, prophecy] of Object.entries(prophecies)) {
+    if (!(i in processedProphecies)) {
+      // This indicates the next index to process.
+      processedProphecies[i] = 0;
+    }
+    for (let j = processedProphecies[i]; j < prophecy.messages.length; ++j) {
+      const email = {
+        from: buildFrom(PROPHECY_AUTHOR[Math.min(j, 2)]),
+        to: CONFIG.smtp.to,
+        messageId: buildMessageId('prophecy.' + i, j), // TODO: Unhack.
+        subject: prophecy.subject,
+        text: prophecy.messages[j]
+      };
+      if (j > 0) {
+        email.references = [buildMessageId('prophecy.' + i, j - 1)];
+      }
+      emails.push({
+        // We don't forge the date here because time of day is not available.
+        email: email,
+        ok: () => { processedProphecies[i] = j + 1; } // TODO: This relies on execution order.
+      });
+    }
+  }
 }
 
 async function main() {
@@ -355,9 +397,11 @@ async function main() {
     while (true) {
       const state = fs.existsSync(STATE_FILE)
           ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
-          : {threads: {}, letters: {}};
-      LOG.debug('Read state: %d threads, %d letters',
-          Object.keys(state.threads).length, Object.keys(state.letters).length);
+          : {threads: {}, letters: {}, prophecies: {}};
+      LOG.debug('Read state: %d letters, %d threads, %d prophecies',
+          Object.keys(state.threads).length,
+          Object.keys(state.letters).length,
+          Object.keys(state.prophecies).length);
       const browser = await puppeteer.launch();
       const page = await browser.newPage();
 
@@ -367,6 +411,10 @@ async function main() {
       const letters = await readLetters(page); // Always reads all.
       await readAttachments(page, letters, state.letters);
       const emails = buildEmailsForLetters(letters, state.letters);
+
+      // Section "Kommunikation Eltern/Klassenleitung".
+      const prophecies = await readProphecies(page);
+      buildEmailsForProphecies(prophecies, state.prophecies, emails);
 
       // Section "Kommunikation Eltern/Fachlehrer".
       const teachers = await readActiveTeachers(page);
