@@ -62,7 +62,6 @@ async function login(page) {
 
 /** Reads all letters, but not possible attachments. */
 async function readLetters(page) {
-  logger.info('Reading letters');
   await page.goto(CONFIG.epLogin.url + '/aktuelles/elternbriefe');
   const letters = await page.$$eval(
     'span.link_nachrichten, a.link_nachrichten',
@@ -80,7 +79,7 @@ async function readLetters(page) {
           dateString: d[3] + '-' + d[2] + '-' + d[1] + ' ' + d[4]
         };
       }));
-  logger.info('Letters read: %d', letters.length);
+  logger.info('Found %d letters', letters.length);
   return letters;
 }
 
@@ -89,7 +88,6 @@ async function readLetters(page) {
  * memory.
  */
 async function readAttachments(page, letters, processedLetters) {
-  logger('Reading attachments');
   const options = {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
   for (const letter of letters) {
     if (letter.id in processedLetters || !letter.url) {
@@ -110,8 +108,7 @@ async function readAttachments(page, letters, processedLetters) {
           resolve(null);
         });
       }).on('error', (e) => {
-        console.error('Aw dang: ' + e);
-        reject(e); // TODO: Handle.
+        reject(e);
       });
     });
   }
@@ -146,9 +143,9 @@ function buildEmailsForLetters(letters, processedLetters) {
         };
       });
 }
-/** Returns the list of teachers with at least one thread. */
+
+/** Returns a list of teachers with at least one thread. */
 async function readActiveTeachers(page) {
-  console.log('Reading active teachers');
   await page.goto(CONFIG.epLogin.url + '/meldungen/kommunikation_fachlehrer');
   const teachers = await page.$$eval(
     'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]',
@@ -160,18 +157,17 @@ async function readActiveTeachers(page) {
           name: a.parentElement.parentElement.firstChild.textContent
         };
       }));
-  console.log('Active teachers: ' + teachers.length);
+  logger.info('Found %d threads', teachers.length);
   return teachers;
 }
 
-// TODO: Fold this into readActiveTeachers()? Does $$eval() support that?
 /**
  * Reads metadata for all threads, based on active teachers returned by readActiveTeachers().
  * Threads are stored with key 'threads' for each teacher.
  */
 async function readThreadsMeta(page, teachers) {
   for (const teacher of teachers) {
-    console.log('Reading threads with: ' + teacher.name);
+    logger.debug('Reading threads with %s', teacher.name);
     await page.goto(teacher.url);
     teacher.threads = await page.$$eval(
         'a[href*="meldungen/kommunikation_fachlehrer/"',
@@ -190,7 +186,6 @@ async function readThreadsMeta(page, teachers) {
  * messages.
  */
 async function readThreadsContents(page, teachers) {
-  console.log('Reading thread contents');
   for (const teacher of teachers) {
     for (const thread of teacher.threads) {
       await page.goto(thread.url + '?load_all=1'); // Prevent pagination (I hope).
@@ -201,8 +196,8 @@ async function readThreadsContents(page, teachers) {
               body: row.children[1].firstChild.textContent
             };
           }));
-      console.log(
-          thread.messages.length + ' messages in "'+ thread.subject + '" with ' + teacher.name);
+      logger.debug(
+          'Read %d messages in "%s" with %s', thread.messages.length, thread.subject, teacher.name);
     }
   }
 }
@@ -250,7 +245,7 @@ function buildMessageId(threadId, i) {
 }
 
 async function sendEmails(emails) {
-  console.log('Sending ' + emails.length + ' emails');
+  logger.info('Sending %d emails', emails.length);
   if (!emails.length) {
     return;
   }
@@ -267,7 +262,7 @@ async function sendEmails(emails) {
   let first = true;
   for (const e of emails) {
     if (CONFIG.options.dontSendEmail) {
-      console.log('Not sending email "' + e.email.subject + '"');
+      logger.info('Not sending email "%s"', e.email.subject);
       e.ok();
       continue;
     }
@@ -276,14 +271,13 @@ async function sendEmails(emails) {
       await new Promise(f => setTimeout(f, CONFIG.email.waitSeconds * 1000));
     }
     first = false;
-    console.log('Sending email "' + e.email.subject + '"');
+    logger.debug('Sending email "%s"', e.email.subject);
     await new Promise((resolve, reject) => {
       transport.sendMail(e.email, (error, info) => {
         if (error) {
-          console.log('Failed to send email: ' + error); // TODO: Handle.
           reject(error);
         } else {
-          console.log('Email sent: ' + info.response);
+          logger.debug('Email sent (%s)', info.response);
           e.ok();
           resolve(null);
         }
@@ -297,7 +291,10 @@ async function sendEmails(emails) {
 async function getPhpSessionIdAsCookie(page) {
   const cookies = await page.cookies();
   const id = cookies.filter(c => c.name === "PHPSESSID");
-  return id.length === 1 ? id[0].name + '=' + id[0].value : ''; // TODO: Handle this?
+  if (id.length !== 1) {
+    throw 'Failed to extract PHPSESSID';
+  }
+  return id[0].name + '=' + id[0].value;
 }
 
 (async () => {
