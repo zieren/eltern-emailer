@@ -13,7 +13,7 @@
     "waitSeconds": 5
   },
   "options": {
-    "dontSendEmail": false,
+    "mute": false,
     "pollingIntervalMinutes": 10,
     "logLevel": "debug"
  }

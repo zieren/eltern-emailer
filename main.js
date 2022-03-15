@@ -16,6 +16,18 @@ const CLI_OPTIONS = {
       name: 'config',
       type: 'string',
       default: 'config.json'
+    },
+    {
+      name: 'ep_password',
+      type: 'string'
+    },
+    {
+      name: 'smtp_password',
+      type: 'string'
+    },
+    {
+      name: 'mute',
+      type: 'boolean'
     }
   ]
 };
@@ -252,7 +264,7 @@ async function sendEmails(emails) {
   });
   let first = true;
   for (const e of emails) {
-    if (CONFIG.options.dontSendEmail) {
+    if (CONFIG.options.mute) {
       LOG.info('Not sending email "%s"', e.email.subject);
       e.ok();
       continue;
@@ -292,13 +304,14 @@ async function main() {
   const parser = await import('args-and-flags').then(aaf => {
     return new aaf.default(CLI_OPTIONS);
   });
-  const { args, flags } = parser.parse(process.argv.slice(2));
+  const {_, flags} = parser.parse(process.argv.slice(2));
 
   // Read config.
   CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
-  if (CONFIG.epLogin.url.startsWith('https://SCHOOL.')) {
-    throw 'Please edit the config file to specify your login credentials, SMTP server etc.';
-  }
+  // Flags override values in config file.
+  CONFIG.epLogin.password = flags.ep_password || CONFIG.epLogin.password;
+  CONFIG.smtp.password = flags.smtp_password || CONFIG.smtp.password;
+  CONFIG.options.mute = flags.mute || CONFIG.options.mute;
 
   // Set up logging.
   LOG = winston.createLogger({
@@ -320,8 +333,13 @@ async function main() {
     ]
   });
 
-  while (true) {
-    try {
+  try {
+    // Ensure config file has been edited.
+    if (CONFIG.epLogin.url.startsWith('https://SCHOOL.')) {
+      throw 'Please edit the config file to specify your login credentials, SMTP server etc.';
+    }
+
+    while (true) {
       const state = fs.existsSync(STATE_FILE)
           ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
           : {threads: {}, letters: {}};
@@ -347,12 +365,13 @@ async function main() {
 
       await browser.close();
       fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-    } catch (e) {
-      LOG.error('Exiting: %s', e);
-      throw e; // TODO: Figure out how to exit cleanly.
+
+      LOG.debug('Waiting %d minutes until next check', CONFIG.options.pollingIntervalMinutes);
+      await sleepSeconds(CONFIG.options.pollingIntervalMinutes * 60);
     }
-    LOG.debug('Waiting %d minutes until next check', CONFIG.options.pollingIntervalMinutes);
-    await sleepSeconds(CONFIG.options.pollingIntervalMinutes * 60);
+  } catch (e) {
+    LOG.error('Exiting: %s', e);
+    throw e; // TODO: Figure out how to exit cleanly.
   }
 };
 
