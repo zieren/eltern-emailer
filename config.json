@@ -1,0 +1,18 @@
+{
+  "epLogin": {
+    "url": "https://SCHOOL.eltern-portal.org/",
+    "email": "EMAIL@ADDRESS",
+    "password": "PASSWORD"
+  },
+  "email": {
+    "server": "SMTP.SERVER",
+    "username": "SMTP_USERNAME",
+    "password": "SMTP_PASSWORD",
+    "from": "FROM@ADDRESS",
+    "to": "TO@ADDRESS",
+    "waitSeconds": 5
+  },
+  "options": {
+    "dontSendEmail": false
+  }
+}
