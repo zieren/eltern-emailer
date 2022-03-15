@@ -54,6 +54,8 @@ Other planned features:
    node main.js
    ```
    The following flags are supported:
-   `--config=file.json`: Set the config filename.
-   `--ep_password=abc123`: Specify the portal login password.
-   `--smtp_password=abc123`: Specify the SMTP server password.
+   * `--mute`: Don't actually send emails. **Useful to avoid email flood on first run.**
+   * `--once`: Check only once and exit, instead of checking every N minutes.
+   * `--config=file.json`: Set the config filename.
+   * `--ep_password=abc123`: Specify the portal login password.
+   * `--smtp_password=abc123`: Specify the SMTP server password.

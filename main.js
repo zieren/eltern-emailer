@@ -27,7 +27,13 @@ const CLI_OPTIONS = {
     },
     {
       name: 'mute',
-      type: 'boolean'
+      type: 'boolean',
+      default: false
+    },
+    {
+      name: 'once',
+      type: 'boolean',
+      default: false
     }
   ]
 };
@@ -311,7 +317,9 @@ async function main() {
   // Flags override values in config file.
   CONFIG.epLogin.password = flags.ep_password || CONFIG.epLogin.password;
   CONFIG.smtp.password = flags.smtp_password || CONFIG.smtp.password;
-  CONFIG.options.mute = flags.mute || CONFIG.options.mute;
+  // Copy flag-only options to config for uniformity.
+  CONFIG.options.mute = flags.mute;
+  CONFIG.options.once = flags.once;
 
   // Set up logging.
   LOG = winston.createLogger({
@@ -366,6 +374,9 @@ async function main() {
       await browser.close();
       fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 
+      if (CONFIG.options.once) {
+        break;
+      }
       LOG.debug('Waiting %d minutes until next check', CONFIG.options.pollingIntervalMinutes);
       await sleepSeconds(CONFIG.options.pollingIntervalMinutes * 60);
     }

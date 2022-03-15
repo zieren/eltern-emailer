@@ -13,7 +13,6 @@
     "waitSeconds": 5
   },
   "options": {
-    "mute": false,
     "pollingIntervalMinutes": 10,
     "logLevel": "debug"
  }
