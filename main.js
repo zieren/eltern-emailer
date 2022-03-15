@@ -21,9 +21,9 @@ const STATE_FILE = 'state.json';
 /** This function does the thing. The login thing. You know? */
 async function login(page) {
   console.log('Logging in');
-  await page.goto(CONFIG.elternportal.url);
-  await page.type('#inputEmail', CONFIG.elternportal.email);
-  await page.type('#inputPassword', CONFIG.elternportal.password);
+  await page.goto(CONFIG.epLogin.url);
+  await page.type('#inputEmail', CONFIG.epLogin.email);
+  await page.type('#inputPassword', CONFIG.epLogin.password);
   await Promise.all([
     page.click('#inputPassword ~ button'),
     page.waitForNavigation()
@@ -33,7 +33,7 @@ async function login(page) {
 /** Reads all letters, but not possible attachments. */
 async function readLetters(page) {
   console.log('Reading letters');
-  await page.goto(CONFIG.elternportal.url + '/aktuelles/elternbriefe');
+  await page.goto(CONFIG.epLogin.url + '/aktuelles/elternbriefe');
   const letters = await page.$$eval(
     'span.link_nachrichten, a.link_nachrichten',
     (nodes) => nodes.map(
@@ -120,7 +120,7 @@ function buildEmailsForLetters(letters, processedLetters) {
 /** Returns the list of teachers with at least one thread. */
 async function readActiveTeachers(page) {
   console.log('Reading active teachers');
-  await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer');
+  await page.goto(CONFIG.epLogin.url + '/meldungen/kommunikation_fachlehrer');
   const teachers = await page.$$eval(
     'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"',
     (anchors) => anchors.map(
