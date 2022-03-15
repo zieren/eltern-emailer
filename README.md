@@ -43,7 +43,7 @@ Other planned features:
    to an installation directory of your choice.
 1. In that directory, run this command to install the required dependencies:
    ```
-   npm install content-disposition nodemailer puppeteer winston
+   npm install args-and-flags content-disposition nodemailer puppeteer winston
    ```
    This downloads 400+MB. You can continue with the next steps in the meanwhile.
 1. Edit the file `config.json` to specify your login credentials, SMTP server etc. All uppercase
