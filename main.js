@@ -244,6 +244,10 @@ function buildMessageId(threadId, i) {
   return threadId + '.' + i + '.eltern-emailer@' + CONFIG.email.from.replace(/.*@/, '');
 }
 
+async function sleepSeconds(seconds) {
+  await new Promise(f => setTimeout(f, seconds * 1000));
+}
+
 async function sendEmails(emails) {
   logger.info('Sending %d emails', emails.length);
   if (!emails.length) {
@@ -268,7 +272,7 @@ async function sendEmails(emails) {
     }
     // Throttle outgoing emails.
     if (!first) {
-      await new Promise(f => setTimeout(f, CONFIG.email.waitSeconds * 1000));
+      await sleepSeconds(CONFIG.email.waitSeconds);
     }
     first = false;
     logger.info('Sending email "%s"', e.email.subject);
@@ -298,34 +302,38 @@ async function getPhpSessionIdAsCookie(page) {
 }
 
 (async () => {
-  try {
-    const state = fs.existsSync(STATE_FILE)
-        ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
-        : {threads: {}, letters: {}};
-    logger.debug('Read state: %d threads, %d letters',
-        Object.keys(state.threads).length, Object.keys(state.letters).length);
-    const browser = await puppeteer.launch();
-    const page = await browser.newPage();
+  while (true) {
+    try {
+      const state = fs.existsSync(STATE_FILE)
+          ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
+          : {threads: {}, letters: {}};
+      logger.debug('Read state: %d threads, %d letters',
+          Object.keys(state.threads).length, Object.keys(state.letters).length);
+      const browser = await puppeteer.launch();
+      const page = await browser.newPage();
 
-    await login(page);
+      await login(page);
 
-    // Section "Aktuelles".
-    const letters = await readLetters(page); // Always reads all.
-    await readAttachments(page, letters, state.letters);
-    const emails = buildEmailsForLetters(letters, state.letters);
+      // Section "Aktuelles".
+      const letters = await readLetters(page); // Always reads all.
+      await readAttachments(page, letters, state.letters);
+      const emails = buildEmailsForLetters(letters, state.letters);
 
-    // Section "Kommunikation Eltern/Fachlehrer".
-    const teachers = await readActiveTeachers(page);
-    await readThreadsMeta(page, teachers);
-    await readThreadsContents(page, teachers);
-    buildEmailsForThreads(teachers, state.threads, emails);
+      // Section "Kommunikation Eltern/Fachlehrer".
+      const teachers = await readActiveTeachers(page);
+      await readThreadsMeta(page, teachers);
+      await readThreadsContents(page, teachers);
+      buildEmailsForThreads(teachers, state.threads, emails);
 
-    await sendEmails(emails);
+      await sendEmails(emails);
 
-    await browser.close();
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-  } catch (e) {
-    logger.error('Exiting: %s', e);
-    throw e; // TODO: Figure out how to exit cleanly.
+      await browser.close();
+      fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+    } catch (e) {
+      logger.error('Exiting: %s', e);
+      throw e; // TODO: Figure out how to exit cleanly.
+    }
+    logger.debug('Waiting %d minutes until next check', CONFIG.options.pollingIntervalMinutes);
+    await sleepSeconds(CONFIG.options.pollingIntervalMinutes * 60);
   }
 })();

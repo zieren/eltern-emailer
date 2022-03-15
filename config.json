@@ -14,6 +14,7 @@
   },
   "options": {
     "dontSendEmail": false,
+    "pollingIntervalMinutes": 10,
     "logLevel": "debug"
  }
 }
