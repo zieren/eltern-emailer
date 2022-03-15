@@ -1,6 +1,7 @@
 /* global Buffer, Promise, process */
 
 // TODO: "letters" -> "announcements"? "news"?
+// TODO: "prophecies" -> "bossThreads"?
 
 const TITLE = 'Eltern-Emailer 0.0.1+ (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
@@ -268,6 +269,51 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
   return emails;
 }
 
+/** Reads messages to/from "Klassenleitung". Each thread has at most two messages. */
+async function readProphecies(page) {
+  await page.goto(CONFIG.epLogin.url + '/meldungen/kommunikation');
+  const prophecies = await page.$$eval(
+    'h3.panel-title', (headings) => headings.map((h) => {return {subject: h.textContent.trim()};}));
+  for (let i = 0; i < prophecies.length; ++i) {
+    prophecies[i].messages = await page.$eval('div#bear_' + i,
+        (div) => Array.from(div.firstElementChild.childNodes)
+            .filter(c => c.nodeName === '#text')
+            .map(c => c.textContent));
+  }
+  // Order is reverse chronological, make it forward.
+  return prophecies.reverse();
+  LOG.info('Found %d prophecies', prophecies.length());
+}
+
+function buildEmailsForProphecies(prophecies, processedProphecies, emails) {
+  for (const [i, prophecy] of Object.entries(prophecies)) {
+    if (!(i in processedProphecies)) {
+      // This indicates the next index to process.
+      processedProphecies[i] = 0;
+    }
+    for (let j = processedProphecies[i]; j < prophecy.messages.length; ++j) {
+      const email = {
+        from: buildFrom(PROPHECY_AUTHOR[Math.min(j, 2)]),
+        to: CONFIG.smtp.to,
+        messageId: buildMessageId('prophecy.' + i, j), // TODO: Unhack.
+        // TODO: ^^ What if these are cleared after the school year, and indexes start at 0 again?
+        // Maybe include a hash of the subject, or the date, to avoid collisions.
+        subject: prophecy.subject,
+        text: prophecy.messages[j]
+      };
+      if (j > 0) {
+        email.references = [buildMessageId('prophecy.' + i, j - 1)];
+      }
+      emails.push({
+        // We don't forge the date here because time of day is not available.
+        email: email,
+        ok: () => { processedProphecies[i] = j + 1; }
+        // TODO: This relies on execution order. Fix it to match handling of threads.
+      });
+    }
+  }
+}
+
 async function sendEmails(emails) {
   LOG.info('Sending %d emails', emails.length);
   if (!emails.length) {
@@ -307,50 +353,6 @@ async function sendEmails(emails) {
         }
       });
     });
-  }
-}
-
-/** Reads messages to/from "Klassenleitung". Each thread has at most two messages. */
-async function readProphecies(page) {
-  await page.goto(CONFIG.epLogin.url + '/meldungen/kommunikation');
-  const prophecies = await page.$$eval(
-    'h3.panel-title', (headings) => headings.map((h) => {return {subject: h.textContent};}));
-  for (let i = 0; i < prophecies.length; ++i) {
-    prophecies[i].messages = await page.$eval('div#bear_' + i,
-        (div) => Array.from(div.firstElementChild.childNodes)
-            .filter(c => c.nodeName === '#text')
-            .map(c => c.textContent));
-  }
-  // Order is reverse chronological, make it forward.
-  return prophecies.reverse();
-  LOG.info('Found %d prophecies', prophecies.length());
-}
-
-function buildEmailsForProphecies(prophecies, processedProphecies, emails) {
-  for (const [i, prophecy] of Object.entries(prophecies)) {
-    if (!(i in processedProphecies)) {
-      // This indicates the next index to process.
-      processedProphecies[i] = 0;
-    }
-    for (let j = processedProphecies[i]; j < prophecy.messages.length; ++j) {
-      const email = {
-        from: buildFrom(PROPHECY_AUTHOR[Math.min(j, 2)]),
-        to: CONFIG.smtp.to,
-        messageId: buildMessageId('prophecy.' + i, j), // TODO: Unhack.
-        // TODO: ^^ What if these are cleared after the school year, and indexes start at 0 again?
-        // Maybe include a hash of the subject, or the date, to avoid collisions.
-        subject: prophecy.subject,
-        text: prophecy.messages[j]
-      };
-      if (j > 0) {
-        email.references = [buildMessageId('prophecy.' + i, j - 1)];
-      }
-      emails.push({
-        // We don't forge the date here because time of day is not available.
-        email: email,
-        ok: () => { processedProphecies[i] = j + 1; } // TODO: This relies on execution order.
-      });
-    }
   }
 }
 
