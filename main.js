@@ -271,7 +271,7 @@ async function sendEmails(emails) {
       await new Promise(f => setTimeout(f, CONFIG.email.waitSeconds * 1000));
     }
     first = false;
-    logger.debug('Sending email "%s"', e.email.subject);
+    logger.info('Sending email "%s"', e.email.subject);
     await new Promise((resolve, reject) => {
       transport.sendMail(e.email, (error, info) => {
         if (error) {
