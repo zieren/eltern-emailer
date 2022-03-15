@@ -14,10 +14,8 @@ Eltern-Emailer logs into the Eltern-Portal website and checks for new content in
 `Kommunikation Eltern/Fachlehrer`. It then sends this content to you via email.
 
 The application does not interact with any third parties except your email provider. It runs on 
-your own desktop or server.
-
-Currently only timed polling is supported. Event-based polling (triggered by the notification email)
-is [planned](#planned-features).
+your own desktop or server. Currently only timed polling is supported. Event-based polling 
+(triggered by the notification email) is [planned](#planned-features).
 
 ### Requirements
 
@@ -29,14 +27,14 @@ runtime environment. It is tested on the following platforms:
 
 ### Current Features
 
-The following information sources (sections in the web UI) are supported:
+The following contents (sections in the web UI) are supported:
 
 * `Aktuelles`
 * `Kommunikation Eltern/Fachlehrer`
 
 ### Planned Features
 
-The following information sources are on my radar (roughly in order of priority):
+The following contents are on my radar (roughly in order of priority):
 
 * `Kommunikation Eltern/Klassenleitung`
 * `Klassen Vertretungsplan`
@@ -73,7 +71,7 @@ types of content). Instead it uses a file called `state.json` to remember which 
 been emailed and detect which is new.
 
 Initially this file does not exist and all content will appear new. If you don't want to get 
-flooded with emails for all existing content, run Eltern-Emailer once with these [flags](#flags):
+flooded with emails on the first run, run Eltern-Emailer once with these [flags](#flags):
 
 ```
 node main.js --mute --once
@@ -102,7 +100,9 @@ This should print no errors. After it has succeeded there should be a `state.jso
 }
 ```
 
-Now use your platform's automation (Task Scheduler on Windows, cron on Linux) to have it run Eltern-Emailer as desired. You can start it once and use its own polling interval management:
+Now use your platform's automation (`Startup` directory or Task Scheduler on Windows, cron on 
+Linux) to have it run Eltern-Emailer as desired. You can start it once and use its own polling 
+interval management:
 
 ```
 node main.js
@@ -110,7 +110,7 @@ node main.js
 
 This will keep running and poll the website every 30 minutes (configurable in `config.json`).
 
-Alternatively you can pass the `--once` [flag](#flags) and have the automation handle the polling interval:
+Alternatively you can pass the `--once` [flag](#flags) and have the OS automation handle the polling interval:
 
 ```
 node main.js --once
@@ -134,7 +134,7 @@ The following flags are supported:
 Eltern-Emailer uses the following components:
 
 * [Puppeteer](https://github.com/puppeteer/puppeteer) for automated browsing (&copy; Google Inc., Apache-2.0 license)
-* [args-and-flags](https://github.com/sethvincent/args-and-flags) for commandline flags (ISC license)
 * [Nodemailer](https://nodemailer.com/) for sending email (by [Andris Reinman](https://github.com/andris9), by [Seth Vincent](https://github.com/sethvincent), MIT license)
 * [winston](https://github.com/winstonjs/winston) for logging (by [Charlie Robbins](https://github.com/indexzero), MIT license)
+* [args-and-flags](https://github.com/sethvincent/args-and-flags) for commandline flags (ISC license)
 * [content-disposition](https://github.com/jshttp/content-disposition) for attachment filenames (by  [Douglas Christopher Wilson](https://github.com/dougwilson), MIT license)
