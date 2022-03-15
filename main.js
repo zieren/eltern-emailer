@@ -381,7 +381,8 @@ async function main() {
       await sleepSeconds(CONFIG.options.pollingIntervalMinutes * 60);
     }
   } catch (e) {
-    LOG.error('Exiting: %s', e);
+    LOG.error(e);
+    LOG.error('Exiting due to previous error');
     throw e; // TODO: Figure out how to exit cleanly.
   }
 };
