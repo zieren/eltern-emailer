@@ -12,7 +12,6 @@ const CONFIG_FILE = process.argv[2] || 'config.json';
 
 /** Our config. */
 const CONFIG = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
-
 if (CONFIG.epLogin.url.startsWith('https://SCHOOL.')) {
   throw 'Please edit the config file to specify your login credentials, SMTP server etc.';
 }
@@ -278,7 +277,9 @@ async function getPhpSessionIdAsCookie(page) {
 }
 
 (async () => {
-  const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+  const state = fs.existsSync(STATE_FILE)
+      ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
+      : {threads: {}, letters: {}};
   const browser = await puppeteer.launch();
   const page = await browser.newPage();
 
