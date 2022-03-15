@@ -7,14 +7,35 @@ const https = require('https');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
+const winston = require('winston');
 
+// Read config.
 const CONFIG_FILE = process.argv[2] || 'config.json';
-
-/** Our config. */
 const CONFIG = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
 if (CONFIG.epLogin.url.startsWith('https://SCHOOL.')) {
   throw 'Please edit the config file to specify your login credentials, SMTP server etc.';
 }
+
+// Set up logging.
+const logFormat = winston.format.printf(({level, message, timestamp}) => {
+  return `${timestamp} ${level}: ${message}`;
+});
+const logger = winston.createLogger({
+  level: CONFIG.options.logLevel,
+  format: winston.format.combine(
+    winston.format.splat(),
+    winston.format.timestamp(),
+    logFormat
+  ),
+  transports: [
+    new winston.transports.File({
+      filename: 'eltern-emailer.log',
+      maxsize: 10 << 20,
+      maxFiles: 2
+    }),
+    new winston.transports.Console()
+  ]
+});
 
 /**
  * List of already processed (i.e. emailed) items. Contains the following keys:
@@ -25,7 +46,6 @@ const STATE_FILE = 'state.json';
 
 /** This function does the thing. The login thing. You know? */
 async function login(page) {
-  console.log('Logging in');
   await page.goto(CONFIG.epLogin.url);
   await page.type('#inputEmail', CONFIG.epLogin.email);
   await page.type('#inputPassword', CONFIG.epLogin.password);
@@ -33,11 +53,16 @@ async function login(page) {
     page.click('#inputPassword ~ button'),
     page.waitForNavigation()
   ]);
+  const success = (await page.$$eval('a[href*="einstellungen"]', (x) => x)).length > 0;
+  if (!success) {
+    throw 'Login failed';
+  }
+  logger.info('Login OK');
 }
 
 /** Reads all letters, but not possible attachments. */
 async function readLetters(page) {
-  console.log('Reading letters');
+  logger.info('Reading letters');
   await page.goto(CONFIG.epLogin.url + '/aktuelles/elternbriefe');
   const letters = await page.$$eval(
     'span.link_nachrichten, a.link_nachrichten',
@@ -55,7 +80,7 @@ async function readLetters(page) {
           dateString: d[3] + '-' + d[2] + '-' + d[1] + ' ' + d[4]
         };
       }));
-  console.log('Letters: ' + letters.length);
+  logger.info('Letters read: %d', letters.length);
   return letters;
 }
 
@@ -64,7 +89,7 @@ async function readLetters(page) {
  * memory.
  */
 async function readAttachments(page, letters, processedLetters) {
-  console.log('Reading attachments');
+  logger('Reading attachments');
   const options = {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
   for (const letter of letters) {
     if (letter.id in processedLetters || !letter.url) {
@@ -81,8 +106,7 @@ async function readAttachments(page, letters, processedLetters) {
           buffers.push(buffer);
         }).on('end', () => {
           letter.content = Buffer.concat(buffers);
-          console.log(
-              'Read attachment (' + letter.content.length + ' bytes) for: ' + letter.subject);
+          logger.info('Read attachment (%d bytes) for: %s', letter.content.length, letter.subject);
           resolve(null);
         });
       }).on('error', (e) => {
@@ -127,7 +151,7 @@ async function readActiveTeachers(page) {
   console.log('Reading active teachers');
   await page.goto(CONFIG.epLogin.url + '/meldungen/kommunikation_fachlehrer');
   const teachers = await page.$$eval(
-    'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"',
+    'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]',
     (anchors) => anchors.map(
       (a) => {
         return {
@@ -277,27 +301,34 @@ async function getPhpSessionIdAsCookie(page) {
 }
 
 (async () => {
-  const state = fs.existsSync(STATE_FILE)
-      ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
-      : {threads: {}, letters: {}};
-  const browser = await puppeteer.launch();
-  const page = await browser.newPage();
+  try {
+    const state = fs.existsSync(STATE_FILE)
+        ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
+        : {threads: {}, letters: {}};
+    logger.debug('Read state: %d threads, %d letters',
+        Object.keys(state.threads).length, Object.keys(state.letters).length);
+    const browser = await puppeteer.launch();
+    const page = await browser.newPage();
 
-  await login(page);
+    await login(page);
 
-  // Section "Aktuelles".
-  const letters = await readLetters(page); // Always reads all.
-  await readAttachments(page, letters, state.letters);
-  const emails = buildEmailsForLetters(letters, state.letters);
+    // Section "Aktuelles".
+    const letters = await readLetters(page); // Always reads all.
+    await readAttachments(page, letters, state.letters);
+    const emails = buildEmailsForLetters(letters, state.letters);
 
-  // Section "Kommunikation Eltern/Fachlehrer".
-  const teachers = await readActiveTeachers(page);
-  await readThreadsMeta(page, teachers);
-  await readThreadsContents(page, teachers);
-  buildEmailsForThreads(teachers, state.threads, emails);
+    // Section "Kommunikation Eltern/Fachlehrer".
+    const teachers = await readActiveTeachers(page);
+    await readThreadsMeta(page, teachers);
+    await readThreadsContents(page, teachers);
+    buildEmailsForThreads(teachers, state.threads, emails);
 
-  await sendEmails(emails);
+    await sendEmails(emails);
 
-  await browser.close();
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+    await browser.close();
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+  } catch (e) {
+    logger.error('Exiting: %s', e);
+    throw e; // TODO: Figure out how to exit cleanly.
+  }
 })();
