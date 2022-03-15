@@ -2,6 +2,9 @@
 
 // TODO: "letters" -> "announcements"? "news"?
 
+const TITLE = 'Eltern-Emailer 0.0.0 (c) 2022 Jörg Zieren, GNU GPL v3.'
+    + ' See https://github.com/zieren/eltern-emailer for component license info';
+
 const contentDisposition = require('content-disposition');
 const https = require('https');
 const fs = require('fs');
@@ -341,6 +344,8 @@ async function main() {
     ]
   });
 
+  LOG.info(TITLE);
+  
   try {
     // Ensure config file has been edited.
     if (CONFIG.epLogin.url.startsWith('https://SCHOOL.')) {
