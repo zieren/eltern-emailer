@@ -13,6 +13,7 @@
     "waitSeconds": 5
   },
   "options": {
-    "dontSendEmail": false
-  }
+    "dontSendEmail": false,
+    "logLevel": "info"
+ }
 }
