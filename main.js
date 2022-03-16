@@ -9,6 +9,7 @@ const TITLE = 'Eltern-Emailer 0.0.1+ (c) 2022 Jörg Zieren, GNU GPL v3.'
 const contentDisposition = require('content-disposition');
 const https = require('https');
 const fs = require('fs');
+const md5 = require("md5");
 const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
 const winston = require('winston');
@@ -357,6 +358,39 @@ async function sendEmails(emails) {
   }
 }
 
+async function readSubstitutions(page, previousHashes, emails) {
+  await page.goto(CONFIG.epLogin.url + '/service/vertretungsplan');
+  const originalHTML = await page.$eval('div#asam_content', (div) => div.innerHTML);
+  const hash = md5(originalHTML);
+  if (hash === previousHashes.subs) {
+    return;
+  }
+
+  const modifiedHTML = '<!DOCTYPE html><html><head><title>Vertretungsplan</title>'
+      + '<style>table, td { border: 1px solid; } img { display: none; }</style></head>'
+      + '<body>' + originalHTML + '</body></html>';
+  const email = {
+    from: buildFrom('Vertretungsplan'),
+    to: CONFIG.smtp.to,
+    subject: 'Vertretungsplan',
+    html: modifiedHTML
+  };
+  emails.push({
+    email: email,
+    ok: () => { previousHashes.subs = hash; }
+  });
+  LOG.info('Found substitution plan update');
+}
+
+function readState() {
+  const state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) : {};
+  const emptyState = {threads: {}, letters: {}, prophecies: {}, hashes: {subs: ''}};
+  for (const [key, value] of Object.entries(emptyState)) {
+    state[key] ||= value;
+  }
+  return state;
+}
+
 async function main() {
   const parser = await import('args-and-flags').then(aaf => {
     return new aaf.default(CLI_OPTIONS);
@@ -401,13 +435,12 @@ async function main() {
     }
 
     while (true) {
-      const state = fs.existsSync(STATE_FILE)
-          ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
-          : {threads: {}, letters: {}, prophecies: {}};
-      LOG.debug('Read state: %d letters, %d threads, %d prophecies',
+      const state = readState();
+      LOG.debug('Read state: %d letters, %d threads, %d prophecies, hashes=%s',
           Object.keys(state.threads).length,
           Object.keys(state.letters).length,
-          Object.keys(state.prophecies).length);
+          Object.keys(state.prophecies).length,
+          JSON.stringify(state.hashes));
       const browser = await puppeteer.launch();
       const page = await browser.newPage();
 
@@ -427,6 +460,8 @@ async function main() {
       await readThreadsMeta(page, teachers);
       await readThreadsContents(page, teachers);
       buildEmailsForThreads(teachers, state.threads, emails);
+
+      await readSubstitutions(page, state.hashes, emails);
 
       await sendEmails(emails);
 
