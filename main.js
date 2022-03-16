@@ -269,7 +269,7 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
   return emails;
 }
 
-/** Reads messages to/from "Klassenleitung". Each thread has at most two messages. */
+/** Reads messages to/from "Klassenleitung". */
 async function readProphecies(page) {
   await page.goto(CONFIG.epLogin.url + '/meldungen/kommunikation');
   const prophecies = await page.$$eval(
@@ -280,9 +280,9 @@ async function readProphecies(page) {
             .filter(c => c.nodeName === '#text')
             .map(c => c.textContent));
   }
+  LOG.info('Found %d prophecies', prophecies.length);
   // Order is reverse chronological, make it forward.
   return prophecies.reverse();
-  LOG.info('Found %d prophecies', prophecies.length());
 }
 
 function buildEmailsForProphecies(prophecies, processedProphecies, emails) {
@@ -293,6 +293,7 @@ function buildEmailsForProphecies(prophecies, processedProphecies, emails) {
     }
     for (let j = processedProphecies[i]; j < prophecy.messages.length; ++j) {
       const email = {
+        // AFAICT each thread has at most two messages.
         from: buildFrom(PROPHECY_AUTHOR[Math.min(j, 2)]),
         to: CONFIG.smtp.to,
         messageId: buildMessageId('prophecy.' + i, j), // TODO: Unhack.
