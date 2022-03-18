@@ -3,7 +3,7 @@
 // TODO: "letters" -> "announcements"? "news"?
 // TODO: "prophecies" -> "bossThreads"?
 
-const TITLE = 'Eltern-Emailer 0.0.1+ (c) 2022 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.0.2 (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
