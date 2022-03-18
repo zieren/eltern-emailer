@@ -250,7 +250,7 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
           const email = {
             from: buildFrom(thread.messages[i].author),
             to: CONFIG.smtp.to,
-            // TODO: Consider enriching this, see TODO for other messageId.
+            // TODO: Consider enriching this, see TODO for other messageId. (#4)
             messageId: buildMessageId(thread.id, i),
             subject: thread.subject,
             text: thread.messages[i].body
@@ -274,7 +274,11 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
 async function readProphecies(page) {
   await page.goto(CONFIG.epLogin.url + '/meldungen/kommunikation');
   const prophecies = await page.$$eval(
-    'h3.panel-title', (headings) => headings.map((h) => {return {subject: h.textContent.trim()};}));
+    'h3.panel-title', (headings) => headings.map((h) => {
+      return {
+        subject: h.textContent.trim().replace(/\(Beantwortet\) (?=\d\d\.\d\d\.\d\d\d\d)/, '')
+      };
+    }));
   for (let i = 0; i < prophecies.length; ++i) {
     prophecies[i].messages = await page.$eval('div#bear_' + i,
         (div) => Array.from(div.firstElementChild.childNodes)
@@ -297,6 +301,7 @@ function buildEmailsForProphecies(prophecies, processedProphecies, emails) {
         // AFAICT each thread has at most two messages.
         from: buildFrom(PROPHECY_AUTHOR[Math.min(j, 2)]),
         to: CONFIG.smtp.to,
+        // TODO: Consider enriching this, see TODO for other messageId (#4).
         messageId: buildMessageId('prophecy.' + i, j), // TODO: Unhack.
         // TODO: ^^ What if these are cleared after the school year, and indexes start at 0 again?
         // Maybe include a hash of the subject, or the date, to avoid collisions.
