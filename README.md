@@ -9,17 +9,17 @@ This project is in alpha state.
 
 ## How it Works
 
-Eltern-Emailer logs into the Eltern-Portal website and checks for new content in certain 
-[categories](#current-features), e.g. news in `Aktuelles` or messages from teachers in 
+Eltern-Emailer logs into the Eltern-Portal website and checks for new content in certain
+[categories](#current-features), e.g. news in `Aktuelles` or messages from teachers in
 `Kommunikation Eltern/Fachlehrer`. It then sends this content to you via email.
 
-The application does not interact with any third parties except your email provider. It runs on 
-your own desktop or server. Currently only timed polling is supported. Event-based polling 
+The application does not interact with any third parties except your email provider. It runs on
+your own desktop or server. Currently only timed polling is supported. Event-based polling
 (triggered by the notification email) is [planned](#planned-features).
 
 ### Requirements
 
-The application requires the free [Node.js](https://en.wikipedia.org/wiki/Node.js) JavaScript 
+The application requires the free [Node.js](https://en.wikipedia.org/wiki/Node.js) JavaScript
 runtime environment. It is tested on the following platforms:
 
 * Windows
@@ -27,17 +27,17 @@ runtime environment. It is tested on the following platforms:
 
 ### Current Features
 
-The following contents (sections in the web UI) are supported:
+The following contents (sections in the web UI) are supported at HEAD:
 
 * `Aktuelles`
 * `Kommunikation Eltern/Fachlehrer`
+* `Kommunikation Eltern/Klassenleitung`
+* `Klassen Vertretungsplan`
 
 ### Planned Features
 
 The following contents are on my radar (roughly in order of priority):
 
-* `Kommunikation Eltern/Klassenleitung`
-* `Klassen Vertretungsplan`
 * `Schulaufgaben / Weitere Termine`
 * `Schwarzes Brett`
 
@@ -47,7 +47,7 @@ know or, even better, contribute code.
 Other planned features:
 
 * Check for the portal's notification email instead of polling every N minutes.
-* Forward email sent to Eltern-Emailer to a teacher via the form on the website
+* Forward email sent to Eltern-Emailer to a teacher via the form on the website.
 * Run on a Raspberry Pi.
 
 ## Installation
@@ -57,7 +57,7 @@ Other planned features:
    to an installation directory of your choice.
 1. In that directory, run this command to install the required dependencies:
    ```
-   npm install args-and-flags content-disposition nodemailer puppeteer winston
+   npm install args-and-flags content-disposition md5 nodemailer puppeteer winston
    ```
    This downloads 400+MB. You can continue with the next step in the meanwhile.
 1. Edit the file `config.json` to specify your login credentials, SMTP server etc. All uppercase
@@ -67,11 +67,11 @@ Other planned features:
 ## Running the Application
 
 The application runs in the Node.js runtime environment. It does not use the portal's indication of
-new content (because that is reset when you log in manually, and it's also not supported for all 
+new content (because that is reset when you log in manually, and it's also not supported for all
 types of content). Instead it uses a file called `state.json` to remember which content has already
 been emailed and detect which is new.
 
-Initially this file does not exist and all content will appear new. If you don't want to get 
+Initially this file does not exist and all content will appear new. If you don't want to get
 flooded with emails on the first run, run Eltern-Emailer once with these [flags](#flags):
 
 ```
@@ -101,8 +101,8 @@ This should print no errors. After it has succeeded there should be a `state.jso
 }
 ```
 
-Now use your platform's automation (`Startup` directory or Task Scheduler on Windows, cron on 
-Linux) to have it run Eltern-Emailer as desired. You can start it once and use its own polling 
+Now use your platform's automation (`Startup` directory or Task Scheduler on Windows, cron on
+Linux) to have it run Eltern-Emailer as desired. You can start it once and use its own polling
 interval management:
 
 ```
@@ -139,3 +139,4 @@ Eltern-Emailer uses the following components:
 * [winston](https://github.com/winstonjs/winston) for logging (by [Charlie Robbins](https://github.com/indexzero), MIT license)
 * [args-and-flags](https://github.com/sethvincent/args-and-flags) for commandline flags (ISC license)
 * [content-disposition](https://github.com/jshttp/content-disposition) for attachment filenames (by  [Douglas Christopher Wilson](https://github.com/dougwilson), MIT license)
+* [md5](https://github.com/pvorb/node-md5) for MD5 hash (by [Paul Vorbach](https://github.com/pvorb), BSD 3-Clause license)
