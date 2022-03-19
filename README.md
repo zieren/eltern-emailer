@@ -1,6 +1,11 @@
 # Eltern-Emailer
 
-Unofficial email interface for `*.eltern-portal.org` sites: Retrieves messages from the web and emails them to you. This saves time, enables text search and integrates with email based workflows.
+Unofficial email interface for `*.eltern-portal.org` sites: Retrieves messages from the web and emails them to you. This has several advantages:
+
+* Saves time
+* Supports multiple parents
+* Integrates with email based workflows
+* Enables text search in your email client
 
 ## Project Status
 
@@ -8,13 +13,19 @@ This project is in alpha state.
 
 ## How it Works
 
-Eltern-Emailer logs into the Eltern-Portal website and checks for new messages and updated content in certain [categories](#current-features), e.g. news in `Aktuelles`, messages from teachers in `Kommunikation Eltern/Fachlehrer` and the substitution plan in `Vertretungsplan`. It then sends these messages and updates to you via email.
+Eltern-Emailer logs into the Eltern-Portal website and checks for new messages and updated content in certain [categories](#current-features), e.g.
+
+* news in `Aktuelles`
+* messages from teachers in `Kommunikation Eltern/Fachlehrer`
+* the substitution plan in `Vertretungsplan`
+
+It then sends these messages and updates to you via email.
 
 The application does not interact with any third parties except your email provider. It runs on your own desktop or server. Currently only timed polling is supported. Event-based polling (triggered by the notification email) is [planned](#planned-features).
 
 ### Requirements
 
-The application requires the free [Node.js](https://en.wikipedia.org/wiki/Node.js) JavaScript runtime environment. It is tested on the following platforms:
+Eltern-Emailer requires the free [Node.js](https://en.wikipedia.org/wiki/Node.js) JavaScript runtime environment. It is tested on the following platforms:
 
 * Windows
 * Linux
@@ -88,7 +99,7 @@ These control the behavior of Eltern-Emailer.
 * `checkIntervalMinutes` How frequently the Eltern-Portal website is checked for new content. This is the maximum latency emails sent by Eltern-Emailer have relative to the content becoming visible online. Please keep this value at the default of 30 minutes (or higher) to limit traffic to the site.
 * `smtpWaitSeconds` Time to wait between sending emails. SMTP servers typically reject messages when they are enqueued too quickly.
 * `once` Run only once and terminate. By default the application keeps running, rechecking every `checkIntervalMinutes`.
-* `mute` Don't actually send emails. Useful to avoid email flood on first run.
+* `mute` Don't actually send emails, but update state. The next run will consider all messages sent. Useful to avoid email flood on first run.
 * `test` Only send test emails, as described in [Installation](#installation) above.
 * `logLevel` The level of detail in the log file and console. These are [npm logging levels](https://github.com/winstonjs/winston#logging-levels).
 
@@ -102,28 +113,7 @@ Initially this file does not exist and all messages and content will appear new.
 node main.js --mute --once
 ```
 
-This should print no errors. After it has succeeded there should be a `state.json` file that looks something like this (but likely longer):
-
-```
-{
-  "threads": {
-    "20455": {
-      "0": 1
-    },
-    "21122": {
-      "0": 1,
-      "1": 1
-    },
-    "21505": {
-      "0": 1
-    },
-  "letters": {
-    "418": 1,
-    "419": 1,
-    "421": 1,
-  }
-}
-```
+This should print no errors. After it has succeeded there should be a `state.json` file with some entries.
 
 Now use your platform's automation (`Startup` directory or Task Scheduler on Windows, cron on
 Linux) to have it run Eltern-Emailer as desired. You can start it once and use its own polling
@@ -141,8 +131,7 @@ Alternatively you can pass the `--once` [flag](#flags) and have the OS automatio
 node main.js --once
 ```
 
-To try it out, manually remove one line in `state.json`, e.g. the first line after `"letters":`.
-This should trigger an email to you on the next run.
+To try it out, manually remove one line in `state.json`, e.g. the first line after `"letters":`. This should trigger an email to you on the next run.
 
 ## Flags
 
