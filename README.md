@@ -60,17 +60,64 @@ Other planned features:
    npm install args-and-flags content-disposition md5 nodemailer puppeteer winston
    ```
    This downloads 400+MB. You can continue with the next step in the meanwhile.
-1. Edit the file `config.json` to specify your login credentials, SMTP server etc. All uppercase
-   parts need to be replaced. If you don't want to store credentials in a file you can pass them
-   via commandline flags (see [Flags](#flags)).
+1. Edit the file `config.json` to specify your login credentials, SMTP server etc. All uppercase parts need to be replaced. If you don't want to store credentials in a file you can pass them via commandline flags (see [Flags](#flags)). See section [Configuration](#configuration) below for a detailed description of all options.
 
    **WARNING**
-   Keep in mind that the emails sent may contain sensitive personal information. Be sure to specify the **correct recipient address** in the `smtp.to` config parameter.
-1. Run the application once in test mode to verify the credentials for the portal and the email server, and to be sure the recipient address is correct:
+   Keep in mind that the emails sent may contain sensitive personal information. Be sure to specify the **correct `emailTo` and `emailFrom` addresses** in the config file.
+1. Run the application once in test mode to verify the credentials for the portal and the email server, and to be sure the `emailTo` and `emailFrom` addresses are correct:
    ```
    node main.js --test --once
    ```
-   This will generate a single test email that only says how many emails would have been sent in normal mode, but contains no personal information. Verify that this email arrives at the correct recipient.
+   This will send two test emails, one to the regular recipient (`emailTo`) and one to the sender's return address (`emailFrom`). The latter is where an undeliverable email would bounce to. The test emails only say how many emails would have been sent in normal mode, but contain no personal information. Verify that both emails arrives at the correct addresses.
+
+## Configuration
+
+The following sections describe the homonymous parts in the `config.json` file.
+
+### `elternportal`
+
+These parameters are used to log into the Eltern-Portal.
+
+`url`
+: The URL of your school's Eltern-Portal, e.g. `https://theogymuc.eltern-portal`
+
+`user`
+: The email address you use when logging in
+
+`pass`
+: The password you use when logging in
+
+### `smtp`
+
+These parameters configure the SMTP transport in the Nodemailer module. The full set of options described in the [Nodemailer documentation](https://nodemailer.com/smtp/) is available. The default values for `port` (465) and `secure` (true) work well for many servers, but yours may require different settings.
+
+### `options`
+
+These control the behavior of Eltern-Emailer.
+
+`emailTo`
+: The recipient of all emails sent by the application. Specify only the address, not the real name. This will typically be a parent's email address, or an address that forwards to both parents.
+
+`emailFrom`
+: The sender used for all emails sent by the application. Specify only the address, not the name. This is where bounced emails are delivered to, e.g. when the recipient's mailbox is full. It can be the same as `emailTo`, or the address of the person maintaining the Eltern-Emailer installation. Keep in mind that bounced emails contain the full content, i.e. sensitive personal information.
+
+`checkIntervalMinutes`
+: How frequently the Eltern-Portal website is checked for new content. This is the maximum latency emails sent by Eltern-Emailer have relative to the content becoming visible online. Please keep this value at the default of 30 minutes (or higher) to limit traffic to the site.
+
+`smtpWaitSeconds`
+: Time to wait between sending emails. SMTP servers typically reject messages when they are enqueued too quickly.
+
+`once`
+: Run only once and terminate. By default the application keeps running, rechecking every `checkIntervalMinutes`.
+
+`mute`
+: Don't actually send emails. Useful to avoid email flood on first run.
+
+`test`
+: Only send test emails, as described in [Installation](#installation) above.
+
+`logLevel`
+: The level of detail in the log file and console. These are [npm logging levels](https://github.com/winstonjs/winston#logging-levels).
 
 ## Running the Application
 
@@ -129,11 +176,23 @@ This should trigger an email to you on the next run.
 
 The following flags are supported:
 
-* `--mute`: Don't actually send emails. **Useful to avoid email flood on first run.**
-* `--once`: Check only once and exit, instead of checking every N minutes.
-* `--config=file.json`: Set the config filename.
-* `--ep_password=abc123`: Specify the portal login password.
-* `--smtp_password=abc123`: Specify the SMTP server password.
+`--once`
+: See [Configuration: options](#options) above.
+
+`--mute`
+: See [Configuration: options](#options) above.
+
+`--test`
+: See [Configuration: options](#options) above.
+
+`--config=file.json`
+: Set the config filename.
+
+`--ep_password=abc123`
+: Specify the Eltern-Portal login password.
+
+`--smtp_password=abc123`
+: Specify the SMTP server password.
 
 ## Log File
 
