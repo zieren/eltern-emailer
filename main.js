@@ -3,7 +3,7 @@
 // TODO: "letters" -> "announcements"? "news"?
 // TODO: "prophecies" -> "bossThreads"?
 
-const TITLE = 'Eltern-Emailer 0.0.2 (c) 2022 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.0.2+ (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
@@ -32,17 +32,16 @@ const CLI_OPTIONS = {
     },
     {
       name: 'mute',
-      type: 'boolean',
-      default: false
+      type: 'boolean'
     },
     {
       name: 'once',
-      type: 'boolean',
-      default: false
+      type: 'boolean'
     }
   ]
 };
 
+const EMPTY_STATE = {threads: {}, letters: {}, prophecies: {}, hashes: {subs: ''}};
 const PROPHECY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
 
 // Initialized in main() after parsing CLI flags.
@@ -147,8 +146,8 @@ async function readAttachments(page, letters, processedLetters) {
   }
 }
 
-function buildEmailsForLetters(letters, processedLetters) {
-  return letters
+function buildEmailsForLetters(letters, processedLetters, emails) {
+  letters
       .filter(letter => !(letter.id in processedLetters))
       // Send oldest letters first, i.e. maintain chronological order. This is not reliable because
       // emails race, but GMail ignores the carefully forged message creation date (it shows the
@@ -174,7 +173,7 @@ function buildEmailsForLetters(letters, processedLetters) {
           email: email,
           ok: () => { processedLetters[letter.id] = 1; }
         };
-      });
+      }).forEach(e => emails.push(e));
 }
 
 /** Returns a list of teachers with at least one thread. */
@@ -389,30 +388,23 @@ async function readSubstitutions(page, previousHashes, emails) {
 
 function readState() {
   const state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) : {};
-  const emptyState = {threads: {}, letters: {}, prophecies: {}, hashes: {subs: ''}};
-  for (const [key, value] of Object.entries(emptyState)) {
-    state[key] ||= value;
+  for (const [key, value] of Object.entries(EMPTY_STATE)) {
+    state[key] = state[key] || value; // Netbeans syntax check chokes on ||= :-|
   }
   return state;
 }
 
-async function main() {
-  const parser = await import('args-and-flags').then(aaf => {
-    return new aaf.default(CLI_OPTIONS);
-  });
-  const {_, flags} = parser.parse(process.argv.slice(2));
-
-  // Read config.
-  CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
+function processFlags(flags) {
   // Flags override values in config file.
   CONFIG.epLogin.password = flags.ep_password || CONFIG.epLogin.password;
   CONFIG.smtp.password = flags.smtp_password || CONFIG.smtp.password;
-  // Copy flag-only options to config for uniformity.
-  CONFIG.options.mute = flags.mute;
-  CONFIG.options.once = flags.once;
+  CONFIG.options.mute = flags.mute !== undefined ? flags.mute : CONFIG.options.mute;
+  CONFIG.options.once = flags.once !== undefined ? flags.once : CONFIG.options.once;
+  CONFIG.options.test = flags.test !== undefined ? flags.test : CONFIG.options.test;
+}
 
-  // Set up logging.
-  LOG = winston.createLogger({
+function createLogger() {
+  return winston.createLogger({
     level: CONFIG.options.logLevel,
     format: winston.format.combine(
       winston.format.splat(),
@@ -430,7 +422,29 @@ async function main() {
       new winston.transports.Console()
     ]
   });
+}
 
+function createTestEmail(numEmails) {
+  return {
+    email: {
+      from: buildFrom('TEST'),
+      to: CONFIG.smtp.to,
+      subject: 'TEST',
+      text: 'The test run was successful. ' + numEmails + ' email(s) would have been sent.'
+    },
+    ok: () => {}
+  };
+}
+
+async function main() {
+  const parser = await import('args-and-flags').then(aaf => {
+    return new aaf.default(CLI_OPTIONS);
+  });
+  const {_, flags} = parser.parse(process.argv.slice(2));
+
+  CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
+  processFlags(flags);
+  LOG = createLogger();
   LOG.info(TITLE);
 
   try {
@@ -450,11 +464,12 @@ async function main() {
       const page = await browser.newPage();
 
       await login(page);
+      const emails = [];
 
       // Section "Aktuelles".
       const letters = await readLetters(page); // Always reads all.
       await readAttachments(page, letters, state.letters);
-      const emails = buildEmailsForLetters(letters, state.letters);
+      buildEmailsForLetters(letters, state.letters, emails);
 
       // Section "Kommunikation Eltern/Klassenleitung".
       const prophecies = await readProphecies(page);
@@ -466,12 +481,18 @@ async function main() {
       await readThreadsContents(page, teachers);
       buildEmailsForThreads(teachers, state.threads, emails);
 
+      // Section "Vertretungsplan"
       await readSubstitutions(page, state.hashes, emails);
 
-      await sendEmails(emails);
-
       await browser.close();
-      fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+
+      if (CONFIG.options.test) {
+        await sendEmails([createTestEmail(emails.length)]);
+        // Don't update state.
+      } else {
+        await sendEmails(emails);
+        fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+      }
 
       if (CONFIG.options.once) {
         break;

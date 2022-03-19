@@ -64,12 +64,17 @@ Other planned features:
    parts need to be replaced. If you don't want to store credentials in a file you can pass them
    via commandline flags (see [Flags](#flags)).
 
+   **WARNING**
+   Keep in mind that the emails sent may contain sensitive personal information. Be sure to specify the **correct recipient address** in the `smtp.to` config parameter.
+1. Run the application once in test mode to verify the credentials for the portal and the email server, and to be sure the recipient address is correct:
+   ```
+   node main.js --test --once
+   ```
+   This will generate a single test email that only says how many emails would have been sent in normal mode, but contains no personal information. Verify that this email arrives at the correct recipient.
+
 ## Running the Application
 
-The application runs in the Node.js runtime environment. It does not use the portal's indication of
-new content (because that is reset when you log in manually, and it's also not supported for all
-types of content). Instead it uses a file called `state.json` to remember which content has already
-been emailed and detect which is new.
+Eltern-Emailer runs in the Node.js runtime environment. It does not use the portal's indication of new content (because that is reset when you access the content manually, and it's also not supported for all types of content). Instead it uses a file called `state.json` to remember which content has already been emailed and detect which is new.
 
 Initially this file does not exist and all content will appear new. If you don't want to get
 flooded with emails on the first run, run Eltern-Emailer once with these [flags](#flags):

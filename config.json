@@ -14,6 +14,9 @@
   },
   "options": {
     "pollingIntervalMinutes": 30,
-    "logLevel": "debug"
+    "logLevel": "debug",
+    "once": false,
+    "mute": false,
+    "test": false
  }
 }
