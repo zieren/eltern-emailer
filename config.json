@@ -1,22 +1,26 @@
 {
-  "epLogin": {
+  "elternportal": {
     "url": "https://SCHOOL.eltern-portal.org/",
-    "email": "EMAIL@ADDRESS",
-    "password": "PASSWORD"
+    "user": "EMAIL ADDRESS FOR LOGIN",
+    "pass": "PASSWORD"
   },
   "smtp": {
-    "server": "SMTP.SERVER",
-    "username": "SMTP_USERNAME",
-    "password": "SMTP_PASSWORD",
-    "from": "FROM@ADDRESS",
-    "to": "TO@ADDRESS",
-    "waitSeconds": 5
+    "host": "YOUR SMTP SERVER",
+    "port": 465,
+    "secure": true,
+    "auth": {
+      "user": "YOUR SMTP USERNAME",
+      "pass": "YOUR SMTP PASSWORD"
+    }
   },
   "options": {
+    "emailTo": "YOUR EMAIL ADDRESS",
+    "emailFrom": "RETURN EMAIL ADDRESS",
     "pollingIntervalMinutes": 30,
+    "smtpWaitSeconds": 5,
     "logLevel": "debug",
     "once": false,
     "mute": false,
     "test": false
- }
+  }
 }

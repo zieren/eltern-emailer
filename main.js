@@ -57,9 +57,9 @@ const STATE_FILE = 'state.json';
 
 /** This function does the thing. The login thing. You know? */
 async function login(page) {
-  await page.goto(CONFIG.epLogin.url);
-  await page.type('#inputEmail', CONFIG.epLogin.email);
-  await page.type('#inputPassword', CONFIG.epLogin.password);
+  await page.goto(CONFIG.elternportal.url);
+  await page.type('#inputEmail', CONFIG.elternportal.user);
+  await page.type('#inputPassword', CONFIG.elternportal.pass);
   await Promise.all([
     page.click('#inputPassword ~ button'),
     page.waitForNavigation()
@@ -81,11 +81,11 @@ async function getPhpSessionIdAsCookie(page) {
 }
 
 function buildFrom(name) {
-  return '"EP - ' + name.replace('"', '') + '" <' + CONFIG.smtp.from + '>';
+  return '"EP - ' + name.replace('"', '') + '" <' + CONFIG.options.emailFrom + '>';
 }
 
 function buildMessageId(threadId, i) {
-  return threadId + '.' + i + '.eltern-emailer@' + CONFIG.smtp.from.replace(/.*@/, '');
+  return threadId + '.' + i + '.eltern-emailer@' + CONFIG.options.emailFrom.replace(/.*@/, '');
 }
 
 async function sleepSeconds(seconds) {
@@ -94,7 +94,7 @@ async function sleepSeconds(seconds) {
 
 /** Reads all letters, but not possible attachments. */
 async function readLetters(page) {
-  await page.goto(CONFIG.epLogin.url + '/aktuelles/elternbriefe');
+  await page.goto(CONFIG.elternportal.url + '/aktuelles/elternbriefe');
   const letters = await page.$$eval(
     'span.link_nachrichten, a.link_nachrichten',
     (nodes) => nodes.map(
@@ -156,7 +156,7 @@ function buildEmailsForLetters(letters, processedLetters, emails) {
       .map(letter => {
         const email = {
           from: buildFrom('Aktuelles'),
-          to: CONFIG.smtp.to,
+          to: CONFIG.options.emailTo,
           subject: letter.subject,
           text: letter.body,
           date: new Date(letter.dateString)
@@ -178,7 +178,7 @@ function buildEmailsForLetters(letters, processedLetters, emails) {
 
 /** Returns a list of teachers with at least one thread. */
 async function readActiveTeachers(page) {
-  await page.goto(CONFIG.epLogin.url + '/meldungen/kommunikation_fachlehrer');
+  await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer');
   const teachers = await page.$$eval(
     'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]',
     (anchors) => anchors.map(
@@ -248,7 +248,7 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
         if (!(i in processedThreads[thread.id])) {
           const email = {
             from: buildFrom(thread.messages[i].author),
-            to: CONFIG.smtp.to,
+            to: CONFIG.options.emailTo,
             // TODO: Consider enriching this, see TODO for other messageId. (#4)
             messageId: buildMessageId(thread.id, i),
             subject: thread.subject,
@@ -271,7 +271,7 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
 
 /** Reads messages to/from "Klassenleitung". */
 async function readProphecies(page) {
-  await page.goto(CONFIG.epLogin.url + '/meldungen/kommunikation');
+  await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation');
   const prophecies = await page.$$eval(
     'h3.panel-title', (headings) => headings.map((h) => {
       return {
@@ -299,7 +299,7 @@ function buildEmailsForProphecies(prophecies, processedProphecies, emails) {
       const email = {
         // AFAICT each thread has at most two messages.
         from: buildFrom(PROPHECY_AUTHOR[Math.min(j, 2)]),
-        to: CONFIG.smtp.to,
+        to: CONFIG.options.emailTo,
         // TODO: Consider enriching this, see TODO for other messageId (#4).
         messageId: buildMessageId('prophecy.' + i, j), // TODO: Unhack.
         // TODO: ^^ What if these are cleared after the school year, and indexes start at 0 again?
@@ -325,16 +325,7 @@ async function sendEmails(emails) {
   if (!emails.length) {
     return;
   }
-  // TODO: Expose more mail server config.
-  const transport = nodemailer.createTransport({
-    host: CONFIG.smtp.server,
-    port: 465,
-    secure: true,
-    auth: {
-      user: CONFIG.smtp.username,
-      pass: CONFIG.smtp.password
-    }
-  });
+  const transport = nodemailer.createTransport(CONFIG.smtp);
   let first = true;
   for (const e of emails) {
     if (CONFIG.options.mute) {
@@ -344,7 +335,7 @@ async function sendEmails(emails) {
     }
     // Throttle outgoing emails.
     if (!first) {
-      await sleepSeconds(CONFIG.smtp.waitSeconds);
+      await sleepSeconds(CONFIG.options.smtpWaitSeconds);
     }
     first = false;
     LOG.info('Sending email "%s"', e.email.subject);
@@ -363,7 +354,7 @@ async function sendEmails(emails) {
 }
 
 async function readSubstitutions(page, previousHashes, emails) {
-  await page.goto(CONFIG.epLogin.url + '/service/vertretungsplan');
+  await page.goto(CONFIG.elternportal.url + '/service/vertretungsplan');
   const originalHTML = await page.$eval('div#asam_content', (div) => div.innerHTML);
   const hash = md5(originalHTML);
   if (hash === previousHashes.subs) {
@@ -375,7 +366,7 @@ async function readSubstitutions(page, previousHashes, emails) {
       + '<body>' + originalHTML + '</body></html>';
   const email = {
     from: buildFrom('Vertretungsplan'),
-    to: CONFIG.smtp.to,
+    to: CONFIG.options.emailTo,
     subject: 'Vertretungsplan',
     html: modifiedHTML
   };
@@ -396,8 +387,8 @@ function readState() {
 
 function processFlags(flags) {
   // Flags override values in config file.
-  CONFIG.epLogin.password = flags.ep_password || CONFIG.epLogin.password;
-  CONFIG.smtp.password = flags.smtp_password || CONFIG.smtp.password;
+  CONFIG.elternportal.pass = flags.ep_password || CONFIG.elternportal.pass;
+  CONFIG.smtp.auth.pass = flags.smtp_password || CONFIG.smtp.auth.pass;
   CONFIG.options.mute = flags.mute !== undefined ? flags.mute : CONFIG.options.mute;
   CONFIG.options.once = flags.once !== undefined ? flags.once : CONFIG.options.once;
   CONFIG.options.test = flags.test !== undefined ? flags.test : CONFIG.options.test;
@@ -428,7 +419,7 @@ function createTestEmail(numEmails) {
   return {
     email: {
       from: buildFrom('TEST'),
-      to: CONFIG.smtp.to,
+      to: CONFIG.options.emailTo,
       subject: 'TEST',
       text: 'The test run was successful. ' + numEmails + ' email(s) would have been sent.'
     },
@@ -449,7 +440,7 @@ async function main() {
 
   try {
     // Ensure config file has been edited.
-    if (CONFIG.epLogin.url.startsWith('https://SCHOOL.')) {
+    if (CONFIG.elternportal.url.startsWith('https://SCHOOL.')) {
       throw 'Please edit the config file to specify your login credentials, SMTP server etc.';
     }
 
