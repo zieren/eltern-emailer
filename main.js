@@ -37,6 +37,10 @@ const CLI_OPTIONS = {
     {
       name: 'once',
       type: 'boolean'
+    },
+    {
+      name: 'test',
+      type: 'boolean'
     }
   ]
 };
@@ -78,10 +82,6 @@ async function getPhpSessionIdAsCookie(page) {
     throw 'Failed to extract PHPSESSID';
   }
   return id[0].name + '=' + id[0].value;
-}
-
-function buildFrom(name) {
-  return '"EP - ' + name.replace('"', '') + '" <' + CONFIG.options.emailFrom + '>';
 }
 
 function buildMessageId(threadId, i) {
@@ -154,13 +154,9 @@ function buildEmailsForLetters(letters, processedLetters, emails) {
       // reception date instead), so it's the best we can do.
       .reverse()
       .map(letter => {
-        const email = {
-          from: buildFrom('Aktuelles'),
-          to: CONFIG.options.emailTo,
-          subject: letter.subject,
+        const email = buildEmail('Aktuelles', letter.subject, {
           text: letter.body,
-          date: new Date(letter.dateString)
-        };
+          date: new Date(letter.dateString)});
         if (letter.content) {
           email.attachments = [
             {
@@ -246,14 +242,11 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
       // chronological order.
       for (let i = thread.messages.length - 1; i >= 0 ; --i) {
         if (!(i in processedThreads[thread.id])) {
-          const email = {
-            from: buildFrom(thread.messages[i].author),
-            to: CONFIG.options.emailTo,
+          const email = buildEmail(thread.messages[i].author, thread.subject, {
             // TODO: Consider enriching this, see TODO for other messageId. (#4)
             messageId: buildMessageId(thread.id, i),
-            subject: thread.subject,
             text: thread.messages[i].body
-          };
+          });
           if (i > 0) {
             email.references = [buildMessageId(thread.id, i - 1)];
           }
@@ -296,17 +289,14 @@ function buildEmailsForProphecies(prophecies, processedProphecies, emails) {
       processedProphecies[i] = 0;
     }
     for (let j = processedProphecies[i]; j < prophecy.messages.length; ++j) {
-      const email = {
-        // AFAICT each thread has at most two messages.
-        from: buildFrom(PROPHECY_AUTHOR[Math.min(j, 2)]),
-        to: CONFIG.options.emailTo,
+      // AFAICT each thread has at most two messages.
+      const email = buildEmail(PROPHECY_AUTHOR[Math.min(j, 2)], prophecy.subject, {
         // TODO: Consider enriching this, see TODO for other messageId (#4).
         messageId: buildMessageId('prophecy.' + i, j), // TODO: Unhack.
         // TODO: ^^ What if these are cleared after the school year, and indexes start at 0 again?
         // Maybe include a hash of the subject, or the date, to avoid collisions.
-        subject: prophecy.subject,
         text: prophecy.messages[j]
-      };
+      });
       if (j > 0) {
         email.references = [buildMessageId('prophecy.' + i, j - 1)];
       }
@@ -364,14 +354,8 @@ async function readSubstitutions(page, previousHashes, emails) {
   const modifiedHTML = '<!DOCTYPE html><html><head><title>Vertretungsplan</title>'
       + '<style>table, td { border: 1px solid; } img { display: none; }</style></head>'
       + '<body>' + originalHTML + '</body></html>';
-  const email = {
-    from: buildFrom('Vertretungsplan'),
-    to: CONFIG.options.emailTo,
-    subject: 'Vertretungsplan',
-    html: modifiedHTML
-  };
   emails.push({
-    email: email,
+    email: buildEmail('Vertretungsplan', 'Vertretungsplan', {html: modifiedHTML}),
     ok: () => { previousHashes.subs = hash; }
   });
   LOG.info('Found substitution plan update');
@@ -415,16 +399,30 @@ function createLogger() {
   });
 }
 
-function createTestEmail(numEmails) {
-  return {
-    email: {
-      from: buildFrom('TEST'),
-      to: CONFIG.options.emailTo,
-      subject: 'TEST',
-      text: 'The test run was successful. ' + numEmails + ' email(s) would have been sent.'
-    },
-    ok: () => {}
-  };
+function createTestEmails(numEmails) {
+  const emailToRecipient = buildEmail('TEST', 'TEST to Recipient', {
+    text: 'The test run was successful. ' + numEmails + ' email(s) would have been sent.'
+  });
+  const emailToSender = buildEmail('TEST', 'TEST to Sender', {
+    text: 'The test run was successful. ' + numEmails + ' email(s) would have been sent.'
+  });
+  [emailToSender.from, emailToSender.to] = [emailToSender.to, emailToSender.from];
+  return [
+    {email: emailToRecipient, ok: () => {}},
+    {email: emailToSender, ok: () => {}}
+  ];
+}
+
+/**
+ * Centralizes setting of common email options. This is to prevent bugs where the recipient/sender
+ * addresses are incorrect.
+ */
+function buildEmail(fromName, subject, options) {
+  return {...options, ...{
+    from: '"EP - ' + fromName.replace(/["\n]/g, '') + '" <' + CONFIG.options.emailFrom + '>',
+    to: CONFIG.options.emailTo,
+    subject: subject
+  }};
 }
 
 async function main() {
@@ -434,6 +432,7 @@ async function main() {
   const {_, flags} = parser.parse(process.argv.slice(2));
 
   CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
+  CONFIG.options.checkIntervalMinutes = Math.max(CONFIG.options.checkIntervalMinutes, 10);
   processFlags(flags);
   LOG = createLogger();
   LOG.info(TITLE);
@@ -478,7 +477,7 @@ async function main() {
       await browser.close();
 
       if (CONFIG.options.test) {
-        await sendEmails([createTestEmail(emails.length)]);
+        await sendEmails(createTestEmails(emails.length));
         // Don't update state.
       } else {
         await sendEmails(emails);
@@ -488,8 +487,8 @@ async function main() {
       if (CONFIG.options.once) {
         break;
       }
-      LOG.debug('Waiting %d minutes until next check', CONFIG.options.pollingIntervalMinutes);
-      await sleepSeconds(CONFIG.options.pollingIntervalMinutes * 60);
+      LOG.debug('Waiting %d minutes until next check', CONFIG.options.checkIntervalMinutes);
+      await sleepSeconds(CONFIG.options.checkIntervalMinutes * 60);
     }
   } catch (e) {
     LOG.error(e);
