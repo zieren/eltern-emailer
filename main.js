@@ -185,7 +185,7 @@ async function readActiveTeachers(page) {
           name: a.parentElement.parentElement.firstChild.textContent
         };
       }));
-  LOG.info('Found %d threads', teachers.length);
+  LOG.info('Found %d teachers with threads', teachers.length);
   return teachers;
 }
 
@@ -444,10 +444,11 @@ async function main() {
     }
 
     while (true) {
+      // Read state within the loop to allow editing the state file manually without restarting.
       const state = readState();
       LOG.debug('Read state: %d letters, %d threads, %d prophecies, hashes=%s',
-          Object.keys(state.threads).length,
           Object.keys(state.letters).length,
+          Object.keys(state.threads).length,
           Object.keys(state.prophecies).length,
           JSON.stringify(state.hashes));
       const browser = await puppeteer.launch();
