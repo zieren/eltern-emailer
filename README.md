@@ -135,6 +135,10 @@ The following flags are supported:
 * `--ep_password=abc123`: Specify the portal login password.
 * `--smtp_password=abc123`: Specify the SMTP server password.
 
+## Log File
+
+Log messages are sent to the console and to the file `eltern-emailer.log`. The log level can be set in the config file. While the project is in alpha state it defaults to `debug`.
+
 ## Components Used
 
 Eltern-Emailer uses the following components:
