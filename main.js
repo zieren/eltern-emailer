@@ -176,7 +176,9 @@ function buildEmailsForLetters(letters, processedLetters, emails) {
 async function readActiveTeachers(page) {
   await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer');
   const teachers = await page.$$eval(
-    'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]',
+    // TODO: This caused duplicates for new messages. See if :first-child fixes this, and
+    // update this comment.
+    'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]:first-child',
     (anchors) => anchors.map(
       (a) => {
         return {
