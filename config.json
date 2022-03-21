@@ -16,7 +16,7 @@
   "options": {
     "emailTo": "YOUR EMAIL ADDRESS",
     "emailFrom": "RETURN EMAIL ADDRESS",
-    "pollingIntervalMinutes": 30,
+    "checkIntervalMinutes": 30,
     "smtpWaitSeconds": 5,
     "logLevel": "debug",
     "once": false,
