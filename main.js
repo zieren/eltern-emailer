@@ -1,6 +1,6 @@
 /* global Buffer, Promise, process */
 
-// TODO: "prophecies" -> "bossThreads"?
+// TODO: "prophecies" -> "contactRequests"?
 
 const TITLE = 'Eltern-Emailer 0.0.3 (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
@@ -12,6 +12,8 @@ const md5 = require("md5");
 const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
 const winston = require('winston');
+
+// ---------- Constants ----------
 
 const CLI_OPTIONS = {
   args: [],
@@ -48,8 +50,7 @@ const EMPTY_STATE = {threads: {}, announcements: {}, prophecies: {}, hashes: {su
 const PROPHECY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
 
 // Initialized in main() after parsing CLI flags.
-let CONFIG = {};
-let LOG = null;
+let CONFIG = {}, LOG = null;
 
 /**
  * List of already processed (i.e. emailed) items. Contains the following keys:
@@ -59,6 +60,54 @@ let LOG = null;
  * - 'hashes': Other content, e.g. "Vertretungsplan"
  */
 const STATE_FILE = 'state.json';
+
+// ---------- Initialization functions ----------
+
+function readState() {
+  const state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) : {};
+  for (const [key, value] of Object.entries(EMPTY_STATE)) {
+    state[key] = state[key] || value; // Netbeans syntax check chokes on ||= :-|
+  }
+  return state;
+}
+
+function processFlags(flags) {
+  // Flags override values in config file.
+  CONFIG.elternportal.pass = flags.ep_password || CONFIG.elternportal.pass;
+  CONFIG.smtp.auth.pass = flags.smtp_password || CONFIG.smtp.auth.pass;
+  CONFIG.options.mute = flags.mute !== undefined ? flags.mute : CONFIG.options.mute;
+  CONFIG.options.once = flags.once !== undefined ? flags.once : CONFIG.options.once;
+  CONFIG.options.test = flags.test !== undefined ? flags.test : CONFIG.options.test;
+}
+
+function createLogger() {
+  return winston.createLogger({
+    level: CONFIG.options.logLevel,
+    format: winston.format.combine(
+      winston.format.splat(),
+      winston.format.timestamp(),
+      winston.format.printf(({level, message, timestamp}) => {
+        return `${timestamp} ${level}: ${message}`;
+      })
+    ),
+    transports: [
+      new winston.transports.File({
+        filename: 'eltern-emailer.log',
+        maxsize: 10 << 20,
+        maxFiles: 2
+      }),
+      new winston.transports.Console()
+    ]
+  });
+}
+
+// ---------- Utilities ----------
+
+async function sleepSeconds(seconds) {
+  await new Promise(f => setTimeout(f, seconds * 1000));
+}
+
+// ---------- Login ----------
 
 /** This function does the thing. The login thing. You know? */
 async function login(page) {
@@ -83,13 +132,7 @@ async function getPhpSessionIdAsCookie(page) {
   return id[0].name + '=' + id[0].value;
 }
 
-function buildMessageId(threadId, i) {
-  return threadId + '.' + i + '.eltern-emailer@' + CONFIG.options.emailFrom.replace(/.*@/, '');
-}
-
-async function sleepSeconds(seconds) {
-  await new Promise(f => setTimeout(f, seconds * 1000));
-}
+// ---------- Announcements ----------
 
 /** Reads all announcements, but not possible attachments. */
 async function readAnnouncements(page) {
@@ -178,6 +221,8 @@ function buildEmailsForAnnouncements(page, announcements, processedAnnouncements
       }).forEach(e => emails.push(e));
 }
 
+// ---------- Threads ----------
+
 /** Returns a list of teachers with at least one thread. */
 async function readActiveTeachers(page) {
   await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer');
@@ -252,11 +297,11 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
         if (!(i in processedThreads[thread.id])) {
           const email = buildEmail(thread.messages[i].author, thread.subject, {
             // TODO: Consider enriching this, see TODO for other messageId. (#4)
-            messageId: buildMessageId(thread.id, i),
+            messageId: buildMessageId('thread-' + i),
             text: thread.messages[i].body
           });
           if (i > 0) {
-            email.references = [buildMessageId(thread.id, i - 1)];
+            email.references = [buildMessageId('thread-' + (i - 1))];
           }
           emails.push({
             // We don't forge the date here because time of day is not available.
@@ -269,6 +314,7 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
   }
   return emails;
 }
+// ---------- Contact requests ----------
 
 /** Reads messages to/from "Klassenleitung". */
 async function readProphecies(page) {
@@ -300,13 +346,13 @@ function buildEmailsForProphecies(prophecies, processedProphecies, emails) {
       // AFAICT each thread has at most two messages.
       const email = buildEmail(PROPHECY_AUTHOR[Math.min(j, 2)], prophecy.subject, {
         // TODO: Consider enriching this, see TODO for other messageId (#4).
-        messageId: buildMessageId('prophecy.' + i, j), // TODO: Unhack.
+        messageId: buildMessageId('prophecy-' + i + '-' + j),
         // TODO: ^^ What if these are cleared after the school year, and indexes start at 0 again?
         // Maybe include a hash of the subject, or the date, to avoid collisions.
         text: prophecy.messages[j]
       });
       if (j > 0) {
-        email.references = [buildMessageId('prophecy.' + i, j - 1)];
+        email.references = [buildMessageId('prophecy-' + i + '-' + (j - 1))];
       }
       emails.push({
         // We don't forge the date here because time of day is not available.
@@ -317,6 +363,64 @@ function buildEmailsForProphecies(prophecies, processedProphecies, emails) {
     }
   }
 }
+
+// ---------- Substitutions ----------
+
+async function readSubstitutions(page, previousHashes, emails) {
+  await page.goto(CONFIG.elternportal.url + '/service/vertretungsplan');
+  const originalHTML = await page.$eval('div#asam_content', (div) => div.innerHTML);
+  const hash = md5(originalHTML);
+  if (hash === previousHashes.subs) {
+    return;
+  }
+
+  const modifiedHTML = '<!DOCTYPE html><html><head><title>Vertretungsplan</title>'
+      + '<style>table, td { border: 1px solid; } img { display: none; }</style></head>'
+      + '<body>' + originalHTML + '</body></html>';
+  emails.push({
+    email: buildEmail('Vertretungsplan', 'Vertretungsplan', {html: modifiedHTML}),
+    ok: () => { previousHashes.subs = hash; }
+  });
+  LOG.info('Found substitution plan update');
+}
+
+// ---------- General email functions ----------
+
+/**
+ * Build a message ID using the same domain as the configured From: address and an ID unique within
+ * Eltern-Emailer.
+ */
+function buildMessageId(localId) {
+  return localId + '.eltern-emailer@' + CONFIG.options.emailFrom.replace(/.*@/, '');
+}
+
+function createTestEmails(numEmails) {
+  const emailToRecipient = buildEmail('TEST', 'TEST to Recipient', {
+    text: 'The test run was successful. ' + numEmails + ' email(s) would have been sent.'
+  });
+  const emailToSender = buildEmail('TEST', 'TEST to Sender', {
+    text: 'The test run was successful. ' + numEmails + ' email(s) would have been sent.'
+  });
+  [emailToSender.from, emailToSender.to] = [emailToSender.to, emailToSender.from];
+  return [
+    {email: emailToRecipient, ok: () => {}},
+    {email: emailToSender, ok: () => {}}
+  ];
+}
+
+/**
+ * Centralizes setting of common email options. This is to prevent bugs where the recipient/sender
+ * addresses are incorrect.
+ */
+function buildEmail(fromName, subject, options) {
+  return {...options, ...{
+    from: '"EP - ' + fromName.replace(/["\n]/g, '') + '" <' + CONFIG.options.emailFrom + '>',
+    to: CONFIG.options.emailTo,
+    subject: subject
+  }};
+}
+
+// ---------- Email sending ----------
 
 async function sendEmails(emails) {
   LOG.info('Sending %d emails', emails.length);
@@ -355,87 +459,7 @@ async function sendEmails(emails) {
   }
 }
 
-async function readSubstitutions(page, previousHashes, emails) {
-  await page.goto(CONFIG.elternportal.url + '/service/vertretungsplan');
-  const originalHTML = await page.$eval('div#asam_content', (div) => div.innerHTML);
-  const hash = md5(originalHTML);
-  if (hash === previousHashes.subs) {
-    return;
-  }
-
-  const modifiedHTML = '<!DOCTYPE html><html><head><title>Vertretungsplan</title>'
-      + '<style>table, td { border: 1px solid; } img { display: none; }</style></head>'
-      + '<body>' + originalHTML + '</body></html>';
-  emails.push({
-    email: buildEmail('Vertretungsplan', 'Vertretungsplan', {html: modifiedHTML}),
-    ok: () => { previousHashes.subs = hash; }
-  });
-  LOG.info('Found substitution plan update');
-}
-
-function readState() {
-  const state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) : {};
-  for (const [key, value] of Object.entries(EMPTY_STATE)) {
-    state[key] = state[key] || value; // Netbeans syntax check chokes on ||= :-|
-  }
-  return state;
-}
-
-function processFlags(flags) {
-  // Flags override values in config file.
-  CONFIG.elternportal.pass = flags.ep_password || CONFIG.elternportal.pass;
-  CONFIG.smtp.auth.pass = flags.smtp_password || CONFIG.smtp.auth.pass;
-  CONFIG.options.mute = flags.mute !== undefined ? flags.mute : CONFIG.options.mute;
-  CONFIG.options.once = flags.once !== undefined ? flags.once : CONFIG.options.once;
-  CONFIG.options.test = flags.test !== undefined ? flags.test : CONFIG.options.test;
-}
-
-function createLogger() {
-  return winston.createLogger({
-    level: CONFIG.options.logLevel,
-    format: winston.format.combine(
-      winston.format.splat(),
-      winston.format.timestamp(),
-      winston.format.printf(({level, message, timestamp}) => {
-        return `${timestamp} ${level}: ${message}`;
-      })
-    ),
-    transports: [
-      new winston.transports.File({
-        filename: 'eltern-emailer.log',
-        maxsize: 10 << 20,
-        maxFiles: 2
-      }),
-      new winston.transports.Console()
-    ]
-  });
-}
-
-function createTestEmails(numEmails) {
-  const emailToRecipient = buildEmail('TEST', 'TEST to Recipient', {
-    text: 'The test run was successful. ' + numEmails + ' email(s) would have been sent.'
-  });
-  const emailToSender = buildEmail('TEST', 'TEST to Sender', {
-    text: 'The test run was successful. ' + numEmails + ' email(s) would have been sent.'
-  });
-  [emailToSender.from, emailToSender.to] = [emailToSender.to, emailToSender.from];
-  return [
-    {email: emailToRecipient, ok: () => {}},
-    {email: emailToSender, ok: () => {}}
-  ];
-}
-
-/**
- * Centralizes setting of common email options. This is to prevent bugs where the recipient/sender
- * addresses are incorrect.
- */
-function buildEmail(fromName, subject, options) {
-  return {...options, ...{
-    from: '"EP - ' + fromName.replace(/["\n]/g, '') + '" <' + CONFIG.options.emailFrom + '>',
-    to: CONFIG.options.emailTo,
-    subject: subject
-  }};
-}
+// ---------- Main ----------
 
 async function main() {
   const parser = await import('args-and-flags').then(aaf => {
