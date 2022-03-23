@@ -1,7 +1,5 @@
 /* global Buffer, Promise, process */
 
-// TODO: "prophecies" -> "contactRequests"?
-
 const TITLE = 'Eltern-Emailer 0.0.3 (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
 
@@ -46,8 +44,8 @@ const CLI_OPTIONS = {
   ]
 };
 
-const EMPTY_STATE = {threads: {}, announcements: {}, prophecies: {}, hashes: {subs: ''}};
-const PROPHECY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
+const EMPTY_STATE = {threads: {}, announcements: {}, inquiries: {}, hashes: {subs: ''}};
+const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
 
 // Initialized in main() after parsing CLI flags.
 let CONFIG = {}, LOG = null;
@@ -56,7 +54,7 @@ let CONFIG = {}, LOG = null;
  * List of already processed (i.e. emailed) items. Contains the following keys:
  * - 'announcements': Announcements in "Aktuelles".
  * - 'threads': Threads in "Kommunikation Eltern/Fachlehrer".
- * - 'prophecies': Threads in "Kommunikation Eltern/Klassenleitung".
+ * - 'inquiries': Inquiries in "Kommunikation Eltern/Klassenleitung".
  * - 'hashes': Other content, e.g. "Vertretungsplan"
  */
 const STATE_FILE = 'state.json';
@@ -314,50 +312,50 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
   }
   return emails;
 }
-// ---------- Contact requests ----------
+// ---------- Inquiries ----------
 
 /** Reads messages to/from "Klassenleitung". */
-async function readProphecies(page) {
+async function readInquiries(page) {
   await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation');
-  const prophecies = await page.$$eval(
+  const inquiries = await page.$$eval(
     'h3.panel-title', (headings) => headings.map((h) => {
       return {
         subject: h.textContent.trim().replace(/\(Beantwortet\) (?=\d\d\.\d\d\.\d\d\d\d)/, '')
       };
     }));
-  for (let i = 0; i < prophecies.length; ++i) {
-    prophecies[i].messages = await page.$eval('div#bear_' + i,
+  for (let i = 0; i < inquiries.length; ++i) {
+    inquiries[i].messages = await page.$eval('div#bear_' + i,
         (div) => Array.from(div.firstElementChild.childNodes)
             .filter(c => c.nodeName === '#text')
             .map(c => c.textContent));
   }
-  LOG.info('Found %d prophecies', prophecies.length);
+  LOG.info('Found %d inquiries', inquiries.length);
   // Order is reverse chronological, make it forward.
-  return prophecies.reverse();
+  return inquiries.reverse();
 }
 
-function buildEmailsForProphecies(prophecies, processedProphecies, emails) {
-  for (const [i, prophecy] of Object.entries(prophecies)) {
-    if (!(i in processedProphecies)) {
+function buildEmailsForInquiries(inquiries, processedInquiries, emails) {
+  for (const [i, inquiry] of Object.entries(inquiries)) {
+    if (!(i in processedInquiries)) {
       // This indicates the next index to process.
-      processedProphecies[i] = 0;
+      processedInquiries[i] = 0;
     }
-    for (let j = processedProphecies[i]; j < prophecy.messages.length; ++j) {
+    for (let j = processedInquiries[i]; j < inquiry.messages.length; ++j) {
       // AFAICT each thread has at most two messages.
-      const email = buildEmail(PROPHECY_AUTHOR[Math.min(j, 2)], prophecy.subject, {
+      const email = buildEmail(INQUIRY_AUTHOR[Math.min(j, 2)], inquiry.subject, {
         // TODO: Consider enriching this, see TODO for other messageId (#4).
-        messageId: buildMessageId('prophecy-' + i + '-' + j),
+        messageId: buildMessageId('inquiry-' + i + '-' + j),
         // TODO: ^^ What if these are cleared after the school year, and indexes start at 0 again?
         // Maybe include a hash of the subject, or the date, to avoid collisions.
-        text: prophecy.messages[j]
+        text: inquiry.messages[j]
       });
       if (j > 0) {
-        email.references = [buildMessageId('prophecy-' + i + '-' + (j - 1))];
+        email.references = [buildMessageId('inquiry-' + i + '-' + (j - 1))];
       }
       emails.push({
         // We don't forge the date here because time of day is not available.
         email: email,
-        ok: () => { processedProphecies[i] = j + 1; }
+        ok: () => { processedInquiries[i] = j + 1; }
         // TODO: This relies on execution order. Fix it to match handling of threads.
       });
     }
@@ -482,10 +480,10 @@ async function main() {
     while (true) {
       // Read state within the loop to allow editing the state file manually without restarting.
       const state = readState();
-      LOG.debug('Read state: %d announcements, %d threads, %d prophecies, hashes=%s',
+      LOG.debug('Read state: %d announcements, %d threads, %d inquiries, hashes=%s',
           Object.keys(state.announcements).length,
           Object.keys(state.threads).length,
-          Object.keys(state.prophecies).length,
+          Object.keys(state.inquiries).length,
           JSON.stringify(state.hashes));
       const browser = await puppeteer.launch();
       const page = await browser.newPage();
@@ -499,8 +497,8 @@ async function main() {
       buildEmailsForAnnouncements(page, announcements, state.announcements, emails);
 
       // Section "Kommunikation Eltern/Klassenleitung".
-      const prophecies = await readProphecies(page);
-      buildEmailsForProphecies(prophecies, state.prophecies, emails);
+      const inquiries = await readInquiries(page);
+      buildEmailsForInquiries(inquiries, state.inquiries, emails);
 
       // Section "Kommunikation Eltern/Fachlehrer".
       const teachers = await readActiveTeachers(page);
