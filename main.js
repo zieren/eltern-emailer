@@ -1,9 +1,8 @@
 /* global Buffer, Promise, process */
 
-// TODO: "letters" -> "announcements"? "news"?
 // TODO: "prophecies" -> "bossThreads"?
 
-const TITLE = 'Eltern-Emailer 0.0.2+ (c) 2022 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.0.3 (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
@@ -45,7 +44,7 @@ const CLI_OPTIONS = {
   ]
 };
 
-const EMPTY_STATE = {threads: {}, letters: {}, prophecies: {}, hashes: {subs: ''}};
+const EMPTY_STATE = {threads: {}, announcements: {}, prophecies: {}, hashes: {subs: ''}};
 const PROPHECY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
 
 // Initialized in main() after parsing CLI flags.
@@ -54,8 +53,10 @@ let LOG = null;
 
 /**
  * List of already processed (i.e. emailed) items. Contains the following keys:
- * - 'letters': Letters in "Aktuelles".
+ * - 'announcements': Announcements in "Aktuelles".
  * - 'threads': Threads in "Kommunikation Eltern/Fachlehrer".
+ * - 'prophecies': Threads in "Kommunikation Eltern/Klassenleitung".
+ * - 'hashes': Other content, e.g. "Vertretungsplan"
  */
 const STATE_FILE = 'state.json';
 
@@ -90,10 +91,10 @@ async function sleepSeconds(seconds) {
   await new Promise(f => setTimeout(f, seconds * 1000));
 }
 
-/** Reads all letters, but not possible attachments. */
-async function readLetters(page) {
+/** Reads all announcements, but not possible attachments. */
+async function readAnnouncements(page) {
   await page.goto(CONFIG.elternportal.url + '/aktuelles/elternbriefe');
-  const letters = await page.$$eval(
+  const announcements = await page.$$eval(
     'span.link_nachrichten, a.link_nachrichten',
     (nodes) => nodes.map(
       (n) => {
@@ -109,57 +110,57 @@ async function readLetters(page) {
           dateString: d[3] + '-' + d[2] + '-' + d[1] + ' ' + d[4]
         };
       }));
-  LOG.info('Found %d letters', letters.length);
-  return letters;
+  LOG.info('Found %d announcements', announcements.length);
+  return announcements;
 }
 
 /**
- * Reads attachments for all letters not included in processedLetters. Attachments are stored in
- * memory.
+ * Reads attachments for all announcements not included in processedAnnouncements. Attachments are
+ * stored in memory.
  */
-async function readAttachments(page, letters, processedLetters) {
+async function readAttachments(page, announcements, processedAnnouncements) {
   const options = {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
-  for (const letter of letters) {
-    if (letter.id in processedLetters || !letter.url) {
+  for (const a of announcements) {
+    if (a.id in processedAnnouncements || !a.url) {
       continue;
     }
     // Collect buffers and use Buffer.concat() to avoid messing with chunk size arithmetics.
     let buffers = [];
     // It seems attachment downloads don't need to be throttled.
     await new Promise((resolve, reject) => {
-      https.get(letter.url, options, (response) => {
-        letter.filename =
+      https.get(a.url, options, (response) => {
+        a.filename =
             contentDisposition.parse(response.headers['content-disposition']).parameters.filename;
         response.on('data', (buffer) => {
           buffers.push(buffer);
         }).on('end', () => {
-          letter.content = Buffer.concat(buffers);
-          LOG.info('Read attachment (%d kb) for: %s', letter.content.length >> 10, letter.subject);
+          a.content = Buffer.concat(buffers);
+          LOG.info('Read attachment (%d kb) for: %s', a.content.length >> 10, a.subject);
           resolve(null);
         });
-      }).on('error', (e) => {
-        reject(e);
+      }).on('error', (error) => {
+        reject(error);
       });
     });
   }
 }
 
-function buildEmailsForLetters(page, letters, processedLetters, emails) {
-  letters
-      .filter(letter => !(letter.id in processedLetters))
-      // Send oldest letters first, i.e. maintain chronological order. This is not reliable because
-      // emails race, but GMail ignores the carefully forged message creation date (it shows the
-      // reception date instead), so it's the best we can do.
+function buildEmailsForAnnouncements(page, announcements, processedAnnouncements, emails) {
+  announcements
+      .filter(a => !(a.id in processedAnnouncements))
+      // Send oldest announcements first, i.e. maintain chronological order. This is not reliable
+      // because emails race, but GMail ignores the carefully forged message creation date (it shows
+      // the reception date instead), so it's the best we can do.
       .reverse()
-      .map(letter => {
-        const email = buildEmail('Aktuelles', letter.subject, {
-          text: letter.body,
-          date: new Date(letter.dateString)});
-        if (letter.content) {
+      .map(a => {
+        const email = buildEmail('Aktuelles', a.subject, {
+          text: a.body,
+          date: new Date(a.dateString)});
+        if (a.content) {
           email.attachments = [
             {
-              filename: letter.filename,
-              content: letter.content
+              filename: a.filename,
+              content: a.content
             }
           ];
         }
@@ -170,8 +171,8 @@ function buildEmailsForLetters(page, letters, processedLetters, emails) {
             if (!page.url().endsWith('/aktuelles/elternbriefe')) {
               await page.goto(CONFIG.elternportal.url + '/aktuelles/elternbriefe');
             }
-            await page.evaluate((id) => { eb_bestaetigung(id); }, letter.id);
-            processedLetters[letter.id] = 1;
+            await page.evaluate((id) => { eb_bestaetigung(id); }, a.id);
+            processedAnnouncements[a.id] = 1;
           }
         };
       }).forEach(e => emails.push(e));
@@ -457,8 +458,8 @@ async function main() {
     while (true) {
       // Read state within the loop to allow editing the state file manually without restarting.
       const state = readState();
-      LOG.debug('Read state: %d letters, %d threads, %d prophecies, hashes=%s',
-          Object.keys(state.letters).length,
+      LOG.debug('Read state: %d announcements, %d threads, %d prophecies, hashes=%s',
+          Object.keys(state.announcements).length,
           Object.keys(state.threads).length,
           Object.keys(state.prophecies).length,
           JSON.stringify(state.hashes));
@@ -469,9 +470,9 @@ async function main() {
       const emails = [];
 
       // Section "Aktuelles".
-      const letters = await readLetters(page); // Always reads all.
-      await readAttachments(page, letters, state.letters);
-      buildEmailsForLetters(page, letters, state.letters, emails);
+      const announcements = await readAnnouncements(page); // Always reads all.
+      await readAttachments(page, announcements, state.announcements);
+      buildEmailsForAnnouncements(page, announcements, state.announcements, emails);
 
       // Section "Kommunikation Eltern/Klassenleitung".
       const prophecies = await readProphecies(page);
