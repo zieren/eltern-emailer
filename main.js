@@ -225,8 +225,8 @@ function buildEmailsForAnnouncements(page, announcements, processedAnnouncements
 async function readActiveTeachers(page) {
   await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer');
   const teachers = await page.$$eval(
-    // TODO: This caused duplicates for new messages. See if :first-child fixes this, and
-    // update this comment.
+    // New messages cause a "Neu" indicator with the same href as the teacher. The :first-child
+    // selector avoids duplicates.
     'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]:first-child',
     (anchors) => anchors.map(
       (a) => {
