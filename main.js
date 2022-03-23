@@ -64,10 +64,8 @@ async function login(page) {
   await page.goto(CONFIG.elternportal.url);
   await page.type('#inputEmail', CONFIG.elternportal.user);
   await page.type('#inputPassword', CONFIG.elternportal.pass);
-  await Promise.all([
-    page.click('#inputPassword ~ button'),
-    page.waitForNavigation()
-  ]);
+  await page.click('#inputPassword ~ button');
+  await page.waitForNavigation();
   const success = (await page.$$eval('a[href*="einstellungen"]', (x) => x)).length > 0;
   if (!success) {
     throw 'Login failed';
@@ -146,7 +144,7 @@ async function readAttachments(page, letters, processedLetters) {
   }
 }
 
-function buildEmailsForLetters(letters, processedLetters, emails) {
+function buildEmailsForLetters(page, letters, processedLetters, emails) {
   letters
       .filter(letter => !(letter.id in processedLetters))
       // Send oldest letters first, i.e. maintain chronological order. This is not reliable because
@@ -167,7 +165,14 @@ function buildEmailsForLetters(letters, processedLetters, emails) {
         }
         return {
           email: email,
-          ok: () => { processedLetters[letter.id] = 1; }
+          ok: async () => {
+            // Navigate to /elternbriefe to load the confirmation JS (function eb_bestaetigung()).
+            if (!page.url().endsWith('/aktuelles/elternbriefe')) {
+              await page.goto(CONFIG.elternportal.url + '/aktuelles/elternbriefe');
+            }
+            await page.evaluate((id) => { eb_bestaetigung(id); }, letter.id);
+            processedLetters[letter.id] = 1;
+          }
         };
       }).forEach(e => emails.push(e));
 }
@@ -322,7 +327,7 @@ async function sendEmails(emails) {
   for (const e of emails) {
     if (CONFIG.options.mute) {
       LOG.info('Not sending email "%s"', e.email.subject);
-      e.ok();
+      await e.ok();
       continue;
     }
     // Throttle outgoing emails.
@@ -331,17 +336,21 @@ async function sendEmails(emails) {
     }
     first = false;
     LOG.info('Sending email "%s"', e.email.subject);
-    await new Promise((resolve, reject) => {
+    // Wait for the callback to run.
+    const ok = await new Promise((resolve) => {
       transport.sendMail(e.email, (error, info) => {
         if (error) {
-          reject(error);
+          LOG.error('Failed to send email: %s', error);
+          resolve(false);
         } else {
           LOG.debug('Email sent (%s)', info.response);
-          e.ok();
-          resolve(null);
+          resolve(true);
         }
       });
     });
+    if (ok) {
+      await e.ok();
+    }
   }
 }
 
@@ -462,7 +471,7 @@ async function main() {
       // Section "Aktuelles".
       const letters = await readLetters(page); // Always reads all.
       await readAttachments(page, letters, state.letters);
-      buildEmailsForLetters(letters, state.letters, emails);
+      buildEmailsForLetters(page, letters, state.letters, emails);
 
       // Section "Kommunikation Eltern/Klassenleitung".
       const prophecies = await readProphecies(page);
@@ -477,8 +486,6 @@ async function main() {
       // Section "Vertretungsplan"
       await readSubstitutions(page, state.hashes, emails);
 
-      await browser.close();
-
       if (CONFIG.options.test) {
         await sendEmails(createTestEmails(emails.length));
         // Don't update state.
@@ -486,6 +493,9 @@ async function main() {
         await sendEmails(emails);
         fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
       }
+
+      // Only close after OK handlers have run.
+      await browser.close();
 
       if (CONFIG.options.once) {
         break;
