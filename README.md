@@ -153,8 +153,8 @@ Log messages are shown on the console and written to the file `eltern-emailer.lo
 Eltern-Emailer uses the following components:
 
 * [Puppeteer](https://github.com/puppeteer/puppeteer) for automated browsing (&copy; Google Inc., Apache-2.0 license)
-* [Nodemailer](https://nodemailer.com/) for sending email (by [Andris Reinman](https://github.com/andris9), by [Seth Vincent](https://github.com/sethvincent), MIT license)
+* [Nodemailer](https://nodemailer.com/) for sending email (by [Andris Reinman](https://github.com/andris9), MIT license)
 * [winston](https://github.com/winstonjs/winston) for logging (by [Charlie Robbins](https://github.com/indexzero), MIT license)
-* [args-and-flags](https://github.com/sethvincent/args-and-flags) for commandline flags (ISC license)
+* [args-and-flags](https://github.com/sethvincent/args-and-flags) for commandline flags (by [Seth Vincent](https://github.com/sethvincent), ISC license)
 * [content-disposition](https://github.com/jshttp/content-disposition) for attachment filenames (by  [Douglas Christopher Wilson](https://github.com/dougwilson), MIT license)
 * [md5](https://github.com/pvorb/node-md5) for MD5 hash (by [Paul Vorbach](https://github.com/pvorb), BSD 3-Clause license)
