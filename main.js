@@ -51,9 +51,6 @@ const CLI_OPTIONS = {
 const EMPTY_STATE = {threads: {}, announcements: {}, inquiries: {}, hashes: {subs: ''}};
 const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
 
-/** Initialized in main() after parsing CLI flags. */
-let CONFIG = {}, LOG = null;
-
 /**
  * List of already processed (i.e. emailed) items. Contains the following keys:
  * - 'announcements': Announcements in "Aktuelles".
@@ -62,6 +59,11 @@ let CONFIG = {}, LOG = null;
  * - 'hashes': Other content, e.g. "Vertretungsplan"
  */
 const STATE_FILE = 'state.json';
+
+// ---------- Shared state ----------
+
+/** Initialized in main() after parsing CLI flags. */
+let CONFIG = {}, LOG = null;
 
 let imapClient = null;
 /** Synchronization between IMAP event listener and main loop. */
@@ -487,32 +489,43 @@ async function processNewEmail() {
   for await (let message of imapClient.fetch({answered: false}, { source: true })) {
     ++numNewMessages;
     const parsedMessage = await simpleParser(message.source);
-    const toValue = parsedMessage.to.value[0];
-    const [localPart] = toValue.address.split('@', 2);
-    const [_, teacherId] = localPart.split('+', 2);
-    if (teacherId) {
-      LOG.info(
-          'Received message for teacher ' + teacherId + ' (' + toValue.name + '): "'
-          + parsedMessage.subject + '" (' + parsedMessage.text.length + ' characters)');
-      outbox.push({
-        teacherId: teacherId,
-        subject: parsedMessage.subject,
-        text: parsedMessage.text,
-        ok: async () => {
-          await imapClient.messageFlagsAdd({ seq: message.seq }, ['\\Answered']);
-          LOG.debug('Marked message to teacher processed: ' + message.seq);
-        }
-      });
-    } else {
-      otherMessages.push(message.seq);
+    // We don't (can't) care about To vs CC.
+    const values = [].concat(
+        parsedMessage.to ? parsedMessage.to.value : [],
+        parsedMessage.cc ? parsedMessage.cc.value : []);
+    for (let i = 0; i < values.length; ++i) {
+      const value = values[i];
+      const [_, teacherId] = value.address.split('@', 2)[0].split('+', 2);
+      // TODO: Extract teacher ID from reference header, so that reply works.
+      if (teacherId) {
+        LOG.info(
+            'Received email for teacher ' + teacherId + ' (' + value.name + '): "'
+            + parsedMessage.subject + '" (' + parsedMessage.text.length + ' characters)');
+        outbox.push({
+          teacherId: teacherId,
+          subject: parsedMessage.subject,
+          text: parsedMessage.text,
+          // Messages can have multiple recipients. The outbox is processed in order. For each
+          // incoming email, the last outbound message produced from that email should mark the
+          // email processed.
+          ok: i === values.length - 1
+              ? async () => {
+                  await imapClient.messageFlagsAdd({ seq: message.seq }, ['\\Answered']);
+                  LOG.debug('Marked email processed: ' + message.seq);
+                }
+              : () => {}
+        });
+      } else {
+        otherMessages.push(message.seq);
+      }
     }
   }
-  LOG.debug('Unprocessed messages: ' + numNewMessages);
+  LOG.debug('New emails: ' + numNewMessages);
 
   if (otherMessages.length) {
     const s = otherMessages.join();
     await imapClient.messageFlagsAdd({seq: s}, ['\\Answered']);
-    LOG.debug('Marking other messages processed: ' + s);
+    LOG.debug('Marking other emails processed: ' + s);
   }
 
   // For simplicity we awake unconditionally. We don't distinguish between new content notifications
@@ -545,6 +558,7 @@ async function sendMessagesToTeachers(page) {
       // TODO: Can we take precautions that this doesn't fail? If it does we'll flood the teacher.
       // Maybe we do have to do it first? Maybe use the state file instead, so that failure is
       // unlikely.
+      LOG.info('Sent message to teacher ' + msg.teacherId);
       await msg.ok();
     } else {
       // TODO: Report this back, i.e. email the error to the user. We probably still want to unqueue
