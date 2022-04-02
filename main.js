@@ -101,8 +101,8 @@ function createLogger() {
 
 // ---------- Utilities ----------
 
-async function sleepSeconds(seconds) {
-  await new Promise(f => setTimeout(f, seconds * 1000));
+function sleepSeconds(seconds) {
+  return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
 
 // ---------- Login ----------
@@ -276,7 +276,7 @@ async function readThreadsContents(page, teachers) {
             };
           }));
       LOG.debug(
-          'Read %d messages in "%s" with %s', thread.messages.length, thread.subject, teacher.name);
+          'Read %d messages with %s in "%s"', thread.messages.length, teacher.name, thread.subject);
     }
   }
 }
@@ -471,13 +471,13 @@ async function main() {
   LOG = createLogger();
   LOG.info(TITLE);
 
-  try {
-    // Ensure config file has been edited.
-    if (CONFIG.elternportal.url.startsWith('https://SCHOOL.')) {
-      throw 'Please edit the config file to specify your login credentials, SMTP server etc.';
-    }
+  // Ensure config file has been edited.
+  if (CONFIG.elternportal.url.startsWith('https://SCHOOL.')) {
+    throw 'Please edit the config file to specify your login credentials, SMTP server etc.';
+  }
 
-    while (true) {
+  while (true) {
+    try {
       // Read state within the loop to allow editing the state file manually without restarting.
       const state = readState();
       LOG.debug('Read state: %d announcements, %d threads, %d inquiries, hashes=%s',
@@ -523,14 +523,15 @@ async function main() {
       if (CONFIG.options.once) {
         break;
       }
-      LOG.debug('Waiting %d minutes until next check', CONFIG.options.checkIntervalMinutes);
-      await sleepSeconds(CONFIG.options.checkIntervalMinutes * 60);
+    } catch (e) {
+      LOG.error(e);
+      // TODO: Detect permanent errors and quit.
     }
-  } catch (e) {
-    LOG.error(e);
-    LOG.error('Exiting due to previous error');
-    throw e; // TODO: Figure out how to exit cleanly.
+    LOG.debug('Waiting %d minutes until next check', CONFIG.options.checkIntervalMinutes);
+    await sleepSeconds(CONFIG.options.checkIntervalMinutes * 60);
   }
 };
 
-main();
+main().catch(e => {
+  LOG.error(e);
+});
