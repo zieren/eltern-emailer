@@ -61,9 +61,9 @@ Other planned features:
    to an installation directory of your choice.
 1. In that directory, run this command to install the required dependencies:
    ```
-   npm install args-and-flags content-disposition md5 nodemailer puppeteer winston
+   npm install args-and-flags content-disposition imapflow mailparser md5 nodemailer puppeteer winston
    ```
-   This downloads 400+MB. You can continue with the next step in the meanwhile.
+   This downloads 400+MB (because it includes a Chromium binary). You can continue with the next step in the meanwhile.
 1. Edit the file `config.json` to specify your login credentials, SMTP server etc. All uppercase parts need to be replaced. If you don't want to store credentials in a file you can pass them via commandline flags (see [Flags](#flags)). See section [Configuration](#configuration) below for a detailed description of all options.
 
    **WARNING**
@@ -153,8 +153,8 @@ Log messages are shown on the console and written to the file `eltern-emailer.lo
 Eltern-Emailer uses the following components:
 
 * [Puppeteer](https://github.com/puppeteer/puppeteer) for automated browsing (&copy; Google Inc., Apache-2.0 license)
-* [Nodemailer](https://nodemailer.com/) for sending email (by [Andris Reinman](https://github.com/andris9), MIT license)
-* [winston](https://github.com/winstonjs/winston) for logging (by [Charlie Robbins](https://github.com/indexzero), MIT license)
-* [args-and-flags](https://github.com/sethvincent/args-and-flags) for commandline flags (by [Seth Vincent](https://github.com/sethvincent), ISC license)
-* [content-disposition](https://github.com/jshttp/content-disposition) for attachment filenames (by  [Douglas Christopher Wilson](https://github.com/dougwilson), MIT license)
-* [md5](https://github.com/pvorb/node-md5) for MD5 hash (by [Paul Vorbach](https://github.com/pvorb), BSD 3-Clause license)
+* [Nodemailer](https://github.com/nodemailer/nodemailer), [imapflow](https://github.com/postalsys/imapflow) and [mailparser](https://github.com/nodemailer/mailparser) for sending/receiving/parsing email (MIT and custom licenses)
+* [winston](https://github.com/winstonjs/winston) for logging (MIT license)
+* [args-and-flags](https://github.com/sethvincent/args-and-flags) for commandline flags (ISC license)
+* [content-disposition](https://github.com/jshttp/content-disposition) for attachment filenames (MIT license)
+* [md5](https://github.com/pvorb/node-md5) for MD5 hash (BSD 3-Clause license)

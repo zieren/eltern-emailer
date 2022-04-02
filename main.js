@@ -1,14 +1,18 @@
 /* global Buffer, Promise, process */
 
-const TITLE = 'Eltern-Emailer 0.0.3 (c) 2022 Jörg Zieren, GNU GPL v3.'
+// TODO: What happens if any of our page interactions fails, e.g. because the element ID changed?
+
+const TITLE = 'Eltern-Emailer 0.0.4 (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
 const https = require('https');
 const fs = require('fs');
+const { ImapFlow } = require('imapflow');
 const md5 = require("md5");
 const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
+const { simpleParser } = require('mailparser');
 const winston = require('winston');
 
 // ---------- Constants ----------
@@ -47,7 +51,7 @@ const CLI_OPTIONS = {
 const EMPTY_STATE = {threads: {}, announcements: {}, inquiries: {}, hashes: {subs: ''}};
 const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
 
-// Initialized in main() after parsing CLI flags.
+/** Initialized in main() after parsing CLI flags. */
 let CONFIG = {}, LOG = null;
 
 /**
@@ -58,6 +62,19 @@ let CONFIG = {}, LOG = null;
  * - 'hashes': Other content, e.g. "Vertretungsplan"
  */
 const STATE_FILE = 'state.json';
+
+let imapClient = null;
+/** Synchronization between IMAP event listener and main loop. */
+let awake = () => {}; // Event handler may fire before the main loop builds the wait Promise.
+/** Outbound messages received asynchronously. */
+let outbox = [];
+/** Wrap logger for IMAP, stripping all fields except msg. */
+const imapLogger = {
+  debug: (o) => {}, // This is too noisy.
+  info: (o) => LOG.info('IMAP: ' + o.msg),
+  warn: (o) => LOG.warn('IMAP: ' + o.msg),
+  error: (o) => LOG.error('IMAP: ' + o.msg)
+};
 
 // ---------- Initialization functions ----------
 
@@ -112,8 +129,10 @@ async function login(page) {
   await page.goto(CONFIG.elternportal.url);
   await page.type('#inputEmail', CONFIG.elternportal.user);
   await page.type('#inputPassword', CONFIG.elternportal.pass);
-  await page.click('#inputPassword ~ button');
-  await page.waitForNavigation();
+  await Promise.all([
+    page.waitForNavigation(),
+    page.click('#inputPassword ~ button')
+  ]);
   const success = (await page.$$eval('a[href*="einstellungen"]', (x) => x)).length > 0;
   if (!success) {
     throw 'Login failed';
@@ -177,7 +196,7 @@ async function readAttachments(page, announcements, processedAnnouncements) {
         }).on('end', () => {
           a.content = Buffer.concat(buffers);
           LOG.info('Read attachment (%d kb) for: %s', a.content.length >> 10, a.subject);
-          resolve(null);
+          resolve();
         });
       }).on('error', (error) => {
         reject(error);
@@ -457,6 +476,85 @@ async function sendEmails(emails) {
   }
 }
 
+// ---------- Incoming email ----------
+
+/** This uses the "answered" flag, which is part of the IMAP standard, to mark messages done. */
+async function processNewEmail() {
+  // Collect messages not intended for forwarding to teachers. These are marked processed to hide
+  // them in the next query.
+  const otherMessages = [];
+  let numNewMessages = 0;
+  for await (let message of imapClient.fetch({answered: false}, { source: true })) {
+    ++numNewMessages;
+    const parsedMessage = await simpleParser(message.source);
+    const toValue = parsedMessage.to.value[0];
+    const [localPart] = toValue.address.split('@', 2);
+    const [_, teacherId] = localPart.split('+', 2);
+    if (teacherId) {
+      LOG.info(
+          'Received message for teacher ' + teacherId + ' (' + toValue.name + '): "'
+          + parsedMessage.subject + '" (' + parsedMessage.text.length + ' characters)');
+      outbox.push({
+        teacherId: teacherId,
+        subject: parsedMessage.subject,
+        text: parsedMessage.text,
+        ok: async () => {
+          await imapClient.messageFlagsAdd({ seq: message.seq }, ['\\Answered']);
+          LOG.debug('Marked message to teacher processed: ' + message.seq);
+        }
+      });
+    } else {
+      otherMessages.push(message.seq);
+    }
+  }
+  LOG.debug('Unprocessed messages: ' + numNewMessages);
+
+  if (otherMessages.length) {
+    const s = otherMessages.join();
+    await imapClient.messageFlagsAdd({seq: s}, ['\\Answered']);
+    LOG.debug('Marking other messages processed: ' + s);
+  }
+
+  // For simplicity we awake unconditionally. We don't distinguish between new content notifications
+  // and other messages, e.g. sick leave confirmation, accepting a false positive once in a blue
+  // moon.
+  if (numNewMessages) {
+    awake();
+  }
+}
+
+// ---------- Outgoing messages ----------
+
+async function sendMessagesToTeachers(page) {
+  LOG.info('Sending ' + outbox.length + ' messages to teachers');
+  for (const msg of outbox) {
+    // Curiously this navigation will always succeed, even for nonexistent IDs. What's more, at
+    // least for ID zero we can actually send messages that we can then retrieve by navigating to
+    // the URL directly. This greatly simplifies testing :-)
+    await page.goto(
+        CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/' + msg.teacherId);
+    await page.type('#new_betreff', msg.subject);
+    // TODO: Split up if >512 chars. (Is that configurable?)
+    await page.type('#nachricht_kom_fach', msg.text);
+    const [response] = await Promise.all([
+      page.waitForNavigation(),
+      page.click('button#send')
+    ]);
+
+    if (response.ok()) {
+      // TODO: Can we take precautions that this doesn't fail? If it does we'll flood the teacher.
+      // Maybe we do have to do it first? Maybe use the state file instead, so that failure is
+      // unlikely.
+      await msg.ok();
+    } else {
+      // TODO: Report this back, i.e. email the error to the user. We probably still want to unqueue
+      // this message.
+      LOG.error('Failed to send message to teacher ' + msg.teacherId + ': ' + response.statusText);
+    }
+  }
+  outbox = [];
+}
+
 // ---------- Main ----------
 
 async function main() {
@@ -476,6 +574,20 @@ async function main() {
     throw 'Please edit the config file to specify your login credentials, SMTP server etc.';
   }
 
+  // Start IMAP listener, if enabled.
+  if (CONFIG.options.imapEnabled) {
+    CONFIG.imap.logger = imapLogger;
+    imapClient = new ImapFlow(CONFIG.imap);
+    imapClient.on('exists', async (data) => {
+      LOG.debug('Received new message(s): ' + JSON.stringify(data));
+      await processNewEmail();
+    });
+    await imapClient.connect();
+    await imapClient.mailboxOpen('INBOX');
+    LOG.info('Listening on IMAP mailbox')
+    await processNewEmail();
+  }
+
   while (true) {
     try {
       // Read state within the loop to allow editing the state file manually without restarting.
@@ -490,6 +602,9 @@ async function main() {
 
       await login(page);
       const emails = [];
+
+      // Send messages to teachers. We later retrieve those messages when crawling threads below.
+      await sendMessagesToTeachers(page);
 
       // Section "Aktuelles".
       const announcements = await readAnnouncements(page); // Always reads all.
@@ -509,6 +624,7 @@ async function main() {
       // Section "Vertretungsplan"
       await readSubstitutions(page, state.hashes, emails);
 
+      // Send emails to user.
       if (CONFIG.options.test) {
         await sendEmails(createTestEmails(emails.length));
         // Don't update state.
@@ -527,8 +643,20 @@ async function main() {
       LOG.error(e);
       // TODO: Detect permanent errors and quit.
     }
+
+    // Wait until timeout or email received.
     LOG.debug('Waiting %d minutes until next check', CONFIG.options.checkIntervalMinutes);
-    await sleepSeconds(CONFIG.options.checkIntervalMinutes * 60);
+    const p = new Promise((resolve) => {
+      awake = resolve;
+      // Only now will the IMAP receive event handler awake us. It could already have populated the
+      // outbox and notified the previous Promise while the main loop was busy, so check for that.
+      if (outbox.length) {
+        resolve();
+      } else {
+        setTimeout(resolve, CONFIG.options.checkIntervalMinutes * 60 * 1000);
+      }
+    });
+    await p;
   }
 };
 
