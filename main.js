@@ -305,22 +305,20 @@ async function readThreadsContents(page, teachers) {
 function buildEmailsForThreads(teachers, processedThreads, emails) {
   for (const teacher of teachers) {
     for (const thread of teacher.threads) {
-      // If messages can ever be deleted, we'd need to hash because n could remain constant or even
-      // decrease when messages disappear.
+      // The thread ID seems to be globally unique.
       if (!(thread.id in processedThreads)) {
         processedThreads[thread.id] = {};
       }
-      // Messages are in reverse chronological order, so process backwards to send in forward
-      // chronological order.
-      for (let i = thread.messages.length - 1; i >= 0 ; --i) {
+      // Messages are in forward chronological order, which is the order in which we want to send.
+      for (let i = 0; i < thread.messages.length; ++i) {
         if (!(i in processedThreads[thread.id])) {
           const email = buildEmail(thread.messages[i].author, thread.subject, {
             // TODO: Consider enriching this, see TODO for other messageId. (#4)
-            messageId: buildMessageId('thread-' + i),
+            messageId: buildMessageId('thread-' + thread.id + '-' + i),
             text: thread.messages[i].body
           });
           if (i > 0) {
-            email.references = [buildMessageId('thread-' + (i - 1))];
+            email.references = [buildMessageId('thread-' + thread.id + '-' + (i - 1))];
           }
           emails.push({
             // We don't forge the date here because time of day is not available.
