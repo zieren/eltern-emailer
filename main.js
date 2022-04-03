@@ -312,13 +312,14 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
       // Messages are in forward chronological order, which is the order in which we want to send.
       for (let i = 0; i < thread.messages.length; ++i) {
         if (!(i in processedThreads[thread.id])) {
+          const messageIdBase = 'thread-' + teacher.id + '-' + thread.id + '-';
           const email = buildEmail(thread.messages[i].author, thread.subject, {
             // TODO: Consider enriching this, see TODO for other messageId. (#4)
-            messageId: buildMessageId('thread-' + thread.id + '-' + i),
+            messageId: buildMessageId(messageIdBase + i),
             text: thread.messages[i].body
           });
           if (i > 0) {
-            email.references = [buildMessageId('thread-' + thread.id + '-' + (i - 1))];
+            email.references = [buildMessageId(messageIdBase + (i - 1))];
           }
           emails.push({
             // We don't forge the date here because time of day is not available.
