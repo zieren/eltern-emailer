@@ -287,6 +287,8 @@ async function readThreadsMeta(page, teachers) {
  */
 async function readThreadsContents(page, teachers) {
   for (const teacher of teachers) {
+    // TODO: Reverse this so we send in chronological order. We can simply sort numerically by
+    // thread ID.
     for (const thread of teacher.threads) {
       await page.goto(thread.url + '?load_all=1'); // Prevent pagination (I hope).
       thread.messages = await page.$eval('div#last_messages',
@@ -305,16 +307,16 @@ async function readThreadsContents(page, teachers) {
 function buildEmailsForThreads(teachers, processedThreads, emails) {
   for (const teacher of teachers) {
     for (const thread of teacher.threads) {
-      // The thread ID seems to be globally unique.
       if (!(thread.id in processedThreads)) {
         processedThreads[thread.id] = {};
       }
       // Messages are in forward chronological order, which is the order in which we want to send.
       for (let i = 0; i < thread.messages.length; ++i) {
         if (!(i in processedThreads[thread.id])) {
+          // The thread ID seems to be globally unique. Including the teacher ID simplifies posting
+          // replies, because the mail client will put this ID in the In-Reply-To header.
           const messageIdBase = 'thread-' + teacher.id + '-' + thread.id + '-';
           const email = buildEmail(thread.messages[i].author, thread.subject, {
-            // TODO: Consider enriching this, see TODO for other messageId. (#4)
             messageId: buildMessageId(messageIdBase + i),
             text: thread.messages[i].body
           });
@@ -432,7 +434,7 @@ function createTestEmails(numEmails) {
  */
 function buildEmail(fromName, subject, options) {
   return {...options, ...{
-    from: '"EP - ' + fromName.replace(/["\n]/g, '') + '" <' + CONFIG.options.emailFrom + '>',
+    from: '"EE - ' + fromName.replace(/["\n]/g, '') + '" <' + CONFIG.options.emailFrom + '>',
     to: CONFIG.options.emailTo,
     subject: subject
   }};
@@ -482,21 +484,44 @@ async function sendEmails(emails) {
 /** This uses the "answered" flag, which is part of the IMAP standard, to mark messages done. */
 async function processNewEmail() {
   // Collect messages not intended for forwarding to teachers. These are marked processed to hide
-  // them in the next query.
-  const otherMessages = [];
+  // them in the next query. Key is IMAP sequence number, value is 1.
+  const otherMessages = {};
   let numNewMessages = 0;
   for await (let message of imapClient.fetch({answered: false}, { source: true })) {
     ++numNewMessages;
     const parsedMessage = await simpleParser(message.source);
-    // We don't (can't) care about To vs CC.
+    // For replies we get the teacher ID and thread ID from the In-Reply-To header, and we don't
+    // need a subject. Check this case first because it's easy to detect.
+    if (parsedMessage.inReplyTo && parsedMessage.inReplyTo.startsWith('<thread-')) {
+      [_, teacherId, threadId] = parsedMessage.inReplyTo.split('-');
+      LOG.info(
+          'Received email for teacher ' + teacherId + ': Reply to thread ' + threadId
+          + ' (' + parsedMessage.text.length + ' characters)');
+      outbox.push({
+        teacherId: teacherId,
+        threadId: threadId,
+        text: parsedMessage.text,
+        ok: async () => {
+          await imapClient.messageFlagsAdd({ seq: message.seq }, ['\\Answered']);
+          LOG.debug('Marked email processed: ' + message.seq);
+        }
+      });
+      continue;
+    }
+    // It's not a valid reply, but could be a valid initial message. Go through all recipients and
+    // check each one for subaddressing.
+
+    // The portal doesn't support CC. It's safe to assume the intent is to have the messagse
+    // delivered to CC recipients just the same.
     const values = [].concat(
         parsedMessage.to ? parsedMessage.to.value : [],
         parsedMessage.cc ? parsedMessage.cc.value : []);
+    otherMessages[message.seq] = 1; // Removed if we found something to process.
     for (let i = 0; i < values.length; ++i) {
       const value = values[i];
       const [_, teacherId] = value.address.split('@', 2)[0].split('+', 2);
-      // TODO: Extract teacher ID from reference header, so that reply works.
       if (teacherId) {
+        delete otherMessages[message.seq];
         LOG.info(
             'Received email for teacher ' + teacherId + ' (' + value.name + '): "'
             + parsedMessage.subject + '" (' + parsedMessage.text.length + ' characters)');
@@ -514,15 +539,13 @@ async function processNewEmail() {
                 }
               : () => {}
         });
-      } else {
-        otherMessages.push(message.seq);
       }
     }
   }
   LOG.debug('New emails: ' + numNewMessages);
 
-  if (otherMessages.length) {
-    const s = otherMessages.join();
+  if (Object.keys(otherMessages).length) {
+    const s = Object.keys(otherMessages).join();
     await imapClient.messageFlagsAdd({seq: s}, ['\\Answered']);
     LOG.debug('Marking other emails processed: ' + s);
   }
@@ -540,12 +563,20 @@ async function processNewEmail() {
 async function sendMessagesToTeachers(page) {
   LOG.info('Sending ' + outbox.length + ' messages to teachers');
   for (const msg of outbox) {
-    // Curiously this navigation will always succeed, even for nonexistent IDs. What's more, at
-    // least for ID zero we can actually send messages that we can then retrieve by navigating to
-    // the URL directly. This greatly simplifies testing :-)
-    await page.goto(
-        CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/' + msg.teacherId);
-    await page.type('#new_betreff', msg.subject);
+    // Curiously this navigation will always succeed, even for nonexistent IDs. What's more, we can
+    // actually send messages that we can then retrieve by navigating to the URL directly. This
+    // greatly simplifies testing :-)
+
+    if (msg.subject) { // not a reply
+      await page.goto(
+          CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/' + msg.teacherId);
+      await page.type('#new_betreff', msg.subject);
+    } else { // a reply
+      await page.goto(
+          CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/'
+          + msg.teacherId + '/_/' + msg.threadId);
+      // We probably don't need load_all=1 here, assuming the reply box is always shown.
+    }
     // TODO: Split up if >512 chars. (Is that configurable?)
     await page.type('#nachricht_kom_fach', msg.text);
     const [response] = await Promise.all([
@@ -654,6 +685,9 @@ async function main() {
       }
     } catch (e) {
       LOG.error(e);
+      LOG.error('URL of this error: ' + page.url());
+      await page.screenshot({ path: 'last_error.png', fullPage: true });
+      LOG.error('Screenshot stored in last_error.png');
       // TODO: Detect permanent errors and quit.
     }
 
