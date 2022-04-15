@@ -1,5 +1,3 @@
-/* global Buffer, Promise, process */
-
 // TODO: What happens if any of our page interactions fails, e.g. because the element ID changed?
 
 const TITLE = 'Eltern-Emailer 0.0.4 (c) 2022 Jörg Zieren, GNU GPL v3.'
@@ -100,6 +98,13 @@ function processFlags(flags) {
   CONFIG.options.mute = flags.mute !== undefined ? flags.mute : CONFIG.options.mute;
   CONFIG.options.once = flags.once !== undefined ? flags.once : CONFIG.options.once;
   CONFIG.options.test = flags.test !== undefined ? flags.test : CONFIG.options.test;
+}
+
+function createImapEmailRegEx() {
+  if (CONFIG.options.imapEmail) {
+    CONFIG.options.imapEmailRegEx =
+        '(^|<)' + CONFIG.options.imapEmail.replace(/\./g, '\\.').replace('@', '(\\+\\d+)?@') + '($|>)';
+  }
 }
 
 function createLogger() {
@@ -328,8 +333,8 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
           if (i > 0) {
             email.references = [buildMessageId(messageIdBase + (i - 1))];
           }
-          if (CONFIG.options.replyTo) {
-            email.replyTo = CONFIG.options.replyTo;
+          if (CONFIG.options.imapEmail) {
+            email.replyTo = CONFIG.options.imapEmail;
           }
           emails.push({
             // We don't forge the date here because time of day is not available.
@@ -495,12 +500,32 @@ async function processNewEmail() {
   // them in the next query. Key is IMAP sequence number, value is 1.
   const otherMessages = {};
   let numNewMessages = 0;
+  
   for await (let message of imapClient.fetch({answered: false}, { source: true })) {
     ++numNewMessages;
+    // This is removed if we found something to process, i.e. registered a success handler that
+    // will mark the message processed.
+    otherMessages[message.seq] = 1; 
     const parsedMessage = await simpleParser(message.source);
+    
+    // The portal doesn't support CC. It's safe to assume the intent is to have the messagse
+    // delivered to CC recipients just the same. BCC is not supported: For replies it doesn't
+    // make sense, and for an initial email we need the address to extract the teacher ID.
+    const values = [].concat(
+      parsedMessage.to ? parsedMessage.to.value : [],
+      parsedMessage.cc ? parsedMessage.cc.value : []);
+    
+      // The user may have set up forwarding from some easy-to-guess address, e.g. the one 
+    // initially registered with the portal. To be safe we check for the hard-to-guess address
+    // in To/Cc.
+    if (!values.find(value => value.address && value.address.match(CONFIG.options.imapEmailRegEx))) {
+      continue;
+    }
+
     // For replies we get the teacher ID and thread ID from the In-Reply-To header, and we don't
     // need a subject. Check this case first because it's easy to detect.
     if (parsedMessage.inReplyTo && parsedMessage.inReplyTo.startsWith('<thread-')) {
+      delete otherMessages[message.seq];
       [_, teacherId, threadId] = parsedMessage.inReplyTo.split('-');
       LOG.info(
           'Received email for teacher ' + teacherId + ': Reply to thread ' + threadId
@@ -519,12 +544,6 @@ async function processNewEmail() {
     // It's not a valid reply, but could be a valid initial message. Go through all recipients and
     // check each one for subaddressing.
 
-    // The portal doesn't support CC. It's safe to assume the intent is to have the messagse
-    // delivered to CC recipients just the same.
-    const values = [].concat(
-        parsedMessage.to ? parsedMessage.to.value : [],
-        parsedMessage.cc ? parsedMessage.cc.value : []);
-    otherMessages[message.seq] = 1; // Removed if we found something to process.
     for (let i = 0; i < values.length; ++i) {
       const value = values[i];
       // Handle "undisclosed-recipients" (no address) and invalid address.
@@ -622,6 +641,7 @@ async function main() {
   CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
   CONFIG.options.checkIntervalMinutes = Math.max(CONFIG.options.checkIntervalMinutes, 10);
   processFlags(flags);
+  createImapEmailRegEx();
   LOG = createLogger();
   LOG.info(TITLE);
 

@@ -26,7 +26,7 @@
     "emailTo": "PARENT(S) EMAIL ADDRESS",
     "emailFrom": "RETURN EMAIL ADDRESS",
     "imapEnabled": true,
-    "replyTo": "IMAP EMAIL ADDRESS",
+    "imapEmail": "IMAP EMAIL ADDRESS",
     "checkIntervalMinutes": 30,
     "smtpWaitSeconds": 5,
     "logLevel": "debug",
