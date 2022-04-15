@@ -34,6 +34,10 @@ const CLI_OPTIONS = {
       type: 'string'
     },
     {
+      name: 'imap_password',
+      type: 'string'
+    },
+    {
       name: 'mute',
       type: 'boolean'
     },
@@ -92,6 +96,7 @@ function processFlags(flags) {
   // Flags override values in config file.
   CONFIG.elternportal.pass = flags.ep_password || CONFIG.elternportal.pass;
   CONFIG.smtp.auth.pass = flags.smtp_password || CONFIG.smtp.auth.pass;
+  CONFIG.imap.auth.pass = flags.imap_password || CONFIG.imap.auth.pass;
   CONFIG.options.mute = flags.mute !== undefined ? flags.mute : CONFIG.options.mute;
   CONFIG.options.once = flags.once !== undefined ? flags.once : CONFIG.options.once;
   CONFIG.options.test = flags.test !== undefined ? flags.test : CONFIG.options.test;
@@ -323,6 +328,9 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
           if (i > 0) {
             email.references = [buildMessageId(messageIdBase + (i - 1))];
           }
+          if (CONFIG.options.replyTo) {
+            email.replyTo = CONFIG.options.replyTo;
+          }
           emails.push({
             // We don't forge the date here because time of day is not available.
             email: email,
@@ -434,7 +442,7 @@ function createTestEmails(numEmails) {
  */
 function buildEmail(fromName, subject, options) {
   return {...options, ...{
-    from: '"EE - ' + fromName.replace(/["\n]/g, '') + '" <' + CONFIG.options.emailFrom + '>',
+    from: '"' + fromName.replace(/["\n]/g, '') + ' (EE)" <' + CONFIG.options.emailFrom + '>',
     to: CONFIG.options.emailTo,
     subject: subject
   }};
@@ -519,6 +527,10 @@ async function processNewEmail() {
     otherMessages[message.seq] = 1; // Removed if we found something to process.
     for (let i = 0; i < values.length; ++i) {
       const value = values[i];
+      // Handle "undisclosed-recipients" (no address) and invalid address.
+      if (!value.address || !value.address.includes('@')) {
+        continue;
+      }
       const [_, teacherId] = value.address.split('@', 2)[0].split('+', 2);
       if (teacherId) {
         delete otherMessages[message.seq];
@@ -681,6 +693,10 @@ async function main() {
       await browser.close();
 
       if (CONFIG.options.once) {
+        LOG.info('Terminating due to --once flag/option');
+        if (imapClient) {
+          await imapClient.logout();
+        }
         break;
       }
     } catch (e) {
@@ -709,4 +725,8 @@ async function main() {
 
 main().catch(e => {
   LOG.error(e);
+  LOG.error(e.stack);
+  if (imapClient) {
+    imapClient.close(); // logout() doesn't work when an operation is in progress
+  }
 });

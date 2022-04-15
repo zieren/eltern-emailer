@@ -13,9 +13,20 @@
       "pass": "YOUR SMTP PASSWORD"
     }
   },
+  "imap": {
+    "host": "YOUR IMAP SERVER",
+    "port": 993,
+    "secure": true,
+    "auth": {
+      "user": "YOUR IMAP USERNAME",
+      "pass": "YOUR IMAP PASSWORD"
+    }
+  },
   "options": {
-    "emailTo": "YOUR EMAIL ADDRESS",
+    "emailTo": "PARENT(S) EMAIL ADDRESS",
     "emailFrom": "RETURN EMAIL ADDRESS",
+    "imapEnabled": true,
+    "replyTo": "IMAP EMAIL ADDRESS",
     "checkIntervalMinutes": 30,
     "smtpWaitSeconds": 5,
     "logLevel": "debug",
