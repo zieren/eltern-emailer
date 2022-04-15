@@ -118,9 +118,17 @@ These control the behavior of Eltern-Emailer.
 
 Eltern-Emailer can receive emails from you and forward them to teachers via the web portal. This requires a dedicated email account accessible via IMAP (see [`imap`](#imap) above). The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. GMail is known to work.
 
+#### Protection Against Abuse
+
 There is no authentication of the email sender. A malicious actor could "inject" an email that the application then forwards to a teacher under your name. To make this unlikely, you should choose an email address that is hard to guess, e.g. `qmqztwrp3g2em78qatms@example.com`, and never publish it. In the config file, specify this address under `options.imapEmail`. Note that it will be included in the headers of emails sent to you from Eltern-Emailer, so forwarding such messages with headers would reveal it to the recipient.
 
+You may want to set up forwarding to this email address, e.g. for notification emails sent to the address you use with the Eltern-Portal (see [below](#reducing-latency)). This latter address may be easy to guess, e.g. `parents@example.com`. To still prevent the above abuse scenario, messages to Eltern-Emailer must be sent directly to the dedicated email address, e.g. `qmqztwrp3g2em78qatms@example.com`, not via forwarding from another address like `parents@example.com`.
+
+#### Replying to a Teacher
+
 When you receive an email for a thread in `Kommunikation Eltern/Fachlehrer` you can simply reply to it. Eltern-Emailer encodes the teacher and thread ID in the message ID and will extract them from the reply.
+
+#### Initial Email to a Teacher
 
 Sending an initial email to a teacher requires a per-teacher setup. Visit the teacher's contact link in the portal under `Kommunikation Eltern/Fachlehrer`, then copy the numerical teacher ID from the URL. E.g. for `https://*.eltern-portal.org/meldungen/kommunikation_fachlehrer/123/Doe_John` this would be 123. Create a contact in your email client with the name of the teacher and the above email address with the teacher ID as a tag, e.g. `qmqztwrp3g2em78qatms+123@example.com`. When you now type the teacher's name in your email client, it should autocomplete the email address including the tag.
 
@@ -128,7 +136,7 @@ Sending an initial email to a teacher requires a per-teacher setup. Visit the te
 
 Eltern-Emailer can check for the notification email sent by the portal whenever a new message is available. This requires a dedicated email account as described [above](#sending-messages-to-teachers).
 
-You should configure the email account you are currently using for the portal to forward notification emails or simply all emails to this new address. Emails that are not notifications (e.g. sick leave confirmations) will also trigger a check, but this is rare and does not cause problems.
+You should configure the email account you are currently using for the portal to forward notification emails or simply all emails to this new address. Emails that are not notifications (e.g. sick leave confirmations) will also trigger a check, but this is rare and should not cause problems.
 
 ## Running the Application
 
