@@ -730,9 +730,11 @@ async function main() {
       }
     } catch (e) {
       LOG.error(e);
-      LOG.error('URL of this error: ' + page.url());
-      await page.screenshot({ path: 'last_error.png', fullPage: true });
-      LOG.error('Screenshot stored in last_error.png');
+      if (page) {
+        LOG.error('URL of this error: ' + page.url());
+        await page.screenshot({ path: 'last_error.png', fullPage: true });
+        LOG.error('Screenshot stored in last_error.png');
+      }
       // TODO: Detect permanent errors and quit.
     }
 
