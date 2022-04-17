@@ -100,10 +100,14 @@ function processFlags(flags) {
   CONFIG.options.test = flags.test !== undefined ? flags.test : CONFIG.options.test;
 }
 
-function createImapEmailRegEx() {
-  if (CONFIG.options.imapEmail) {
-    CONFIG.options.imapEmailRegEx =
-        '(^|<)' + CONFIG.options.imapEmail.replace(/\./g, '\\.').replace('@', '(\\+\\d+)?@') + '($|>)';
+function createIncomingEmailRegExp() {
+  if (CONFIG.options.incomingEmailAddressForForwarding) {
+    CONFIG.options.incomingEmailRegEx =
+        '(^|<)' 
+        + CONFIG.options.incomingEmailAddressForForwarding
+            .replace(/\./g, '\\.')
+            .replace('@', '(\\+\\d+)?@') 
+        + '($|>)';
   }
 }
 
@@ -333,8 +337,8 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
           if (i > 0) {
             email.references = [buildMessageId(messageIdBase + (i - 1))];
           }
-          if (CONFIG.options.imapEmail) {
-            email.replyTo = CONFIG.options.imapEmail;
+          if (CONFIG.options.incomingEmailAddressForForwarding) {
+            email.replyTo = CONFIG.options.incomingEmailAddressForForwarding;
           }
           emails.push({
             // We don't forge the date here because time of day is not available.
@@ -497,15 +501,20 @@ async function sendEmails(emails) {
 /** This uses the "answered" flag, which is part of the IMAP standard, to mark messages done. */
 async function processNewEmail() {
   // Collect messages not intended for forwarding to teachers. These are marked processed to hide
-  // them in the next query. Key is IMAP sequence number, value is 1.
-  const otherMessages = {};
+  // them in the next query. They only trigger a check. Key is IMAP sequence number, value is 1.
+  const ignoredMessages = {};
   let numNewMessages = 0;
   
   for await (let message of imapClient.fetch({answered: false}, { source: true })) {
     ++numNewMessages;
     // This is removed if we found something to process, i.e. registered a success handler that
     // will mark the message processed.
-    otherMessages[message.seq] = 1; 
+    ignoredMessages[message.seq] = 1; 
+    // If no incoming email address is set up, there is nothing to do except mark new messages.
+    if (!CONFIG.options.incomingEmailRegEx) {
+      continue;
+    }
+
     const parsedMessage = await simpleParser(message.source);
     
     // The portal doesn't support CC. It's safe to assume the intent is to have the messagse
@@ -515,17 +524,18 @@ async function processNewEmail() {
       parsedMessage.to ? parsedMessage.to.value : [],
       parsedMessage.cc ? parsedMessage.cc.value : []);
     
-      // The user may have set up forwarding from some easy-to-guess address, e.g. the one 
+    // The user may have set up forwarding from some easy-to-guess address, e.g. the one 
     // initially registered with the portal. To be safe we check for the hard-to-guess address
     // in To/Cc.
-    if (!values.find(value => value.address && value.address.match(CONFIG.options.imapEmailRegEx))) {
+    if (!values.find(
+        value => value.address && value.address.match(CONFIG.options.incomingEmailRegEx))) {
       continue;
     }
 
     // For replies we get the teacher ID and thread ID from the In-Reply-To header, and we don't
     // need a subject. Check this case first because it's easy to detect.
     if (parsedMessage.inReplyTo && parsedMessage.inReplyTo.startsWith('<thread-')) {
-      delete otherMessages[message.seq];
+      delete ignoredMessages[message.seq];
       [_, teacherId, threadId] = parsedMessage.inReplyTo.split('-');
       LOG.info(
           'Received email for teacher ' + teacherId + ': Reply to thread ' + threadId
@@ -552,7 +562,7 @@ async function processNewEmail() {
       }
       const [_, teacherId] = value.address.split('@', 2)[0].split('+', 2);
       if (teacherId) {
-        delete otherMessages[message.seq];
+        delete ignoredMessages[message.seq];
         LOG.info(
             'Received email for teacher ' + teacherId + ' (' + value.name + '): "'
             + parsedMessage.subject + '" (' + parsedMessage.text.length + ' characters)');
@@ -575,15 +585,14 @@ async function processNewEmail() {
   }
   LOG.debug('New emails: ' + numNewMessages);
 
-  if (Object.keys(otherMessages).length) {
-    const s = Object.keys(otherMessages).join();
-    await imapClient.messageFlagsAdd({seq: s}, ['\\Answered']);
-    LOG.debug('Marking other emails processed: ' + s);
+  if (Object.keys(ignoredMessages).length) {
+    const seqs = Object.keys(ignoredMessages).join();
+    await imapClient.messageFlagsAdd({seq: seqs}, ['\\Answered']);
+    LOG.debug('Marking other emails processed: ' + seqs);
   }
 
   // For simplicity we awake unconditionally. We don't distinguish between new content notifications
-  // and other messages, e.g. sick leave confirmation, accepting a false positive once in a blue
-  // moon.
+  // and ignored messages, e.g. sick leave confirmation. An occasional false positive is OK.
   if (numNewMessages) {
     awake();
   }
@@ -641,7 +650,7 @@ async function main() {
   CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
   CONFIG.options.checkIntervalMinutes = Math.max(CONFIG.options.checkIntervalMinutes, 10);
   processFlags(flags);
-  createImapEmailRegEx();
+  createIncomingEmailRegExp();
   LOG = createLogger();
   LOG.info(TITLE);
 
@@ -651,7 +660,7 @@ async function main() {
   }
 
   // Start IMAP listener, if enabled.
-  if (CONFIG.options.imapEnabled) {
+  if (CONFIG.options.incomingEmailEnabled) {
     CONFIG.imap.logger = imapLogger;
     imapClient = new ImapFlow(CONFIG.imap);
     imapClient.on('exists', async (data) => {

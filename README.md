@@ -1,6 +1,11 @@
 # Eltern-Emailer
 
-Unofficial email interface for `*.eltern-portal.org` sites: Retrieves messages from the web and emails them to you. This has several advantages:
+Unofficial email interface for `*.eltern-portal.org` sites: 
+
+* Retrieves messages from the website and emails them to you.
+* Receives emails from you and posts them on the website.
+
+This has several advantages:
 
 * Saves time
 * Supports multiple parents
@@ -13,13 +18,13 @@ This project is in alpha state.
 
 ## How it Works
 
-Eltern-Emailer logs into the Eltern-Portal website and checks for new messages and updated content in certain [categories](#current-features), e.g.
+Eltern-Emailer logs into the Eltern-Portal website and checks for new messages and updated content in certain [categories](#supported-sections-at-head), e.g.
 
 * news in `Aktuelles`
 * messages from teachers in `Kommunikation Eltern/Fachlehrer/Klassenleitung`
 * the substitution plan in `Vertretungsplan`
 
-It then sends these messages and updates to you via email.
+It then sends these messages and news to you via email.
 
 Optionally, it also checks a dedicated IMAP inbox for emails from you and forwards them to the intended teacher. This allows you to communicate with any teacher entirely via email.
 
@@ -32,10 +37,7 @@ Eltern-Emailer requires the free [Node.js](https://en.wikipedia.org/wiki/Node.js
 * Windows
 * Linux
 
-### Current Features (at HEAD)
-
-* Check the portal for new messages from the school in the sections listed below and forward them to the parent via email.
-* Check an IMAP inbox for messages from the parents and forward them to the intended teacher via the portal.
+### Supported Sections (at HEAD)
 
 The following sections in the web UI are supported:
 
@@ -71,7 +73,7 @@ Other planned features:
 
    **WARNING**
    Keep in mind that the emails sent may contain sensitive personal information. Be sure to specify the correct `emailTo` and `emailFrom` addresses in the config file.
-1. Run the application once in test mode to verify the credentials for the portal and the email server, and to be sure the `emailTo` and `emailFrom` addresses are correct:
+1. Run the application once in test mode to verify the credentials for the website and the email server, and to be sure the `emailTo` and `emailFrom` addresses are correct:
    ```
    node main.js --test --once
    ```
@@ -97,7 +99,7 @@ These parameters configure the SMTP transport in the Nodemailer module. The full
 
 These parameters configure Eltern-Emailer to check a dedicated IMAP mailbox for incoming email. The full set of options described in the [ImapFlow documentation](https://imapflow.com/module-imapflow-ImapFlow.html) is available.
 
-IMAP support is optional and must be turned on via `imapEnabled` in the [`options`](#options) section. It enables two features: [Sending messages to teachers](#sending-messages-to-teachers) and [reducing latency](#reducing-latency).
+IMAP support is optional and must be turned on via `incomingEmailEnabled` in the [`options`](#options) section. It enables two features: [Sending messages to teachers](#sending-messages-to-teachers) and [reducing latency](#reducing-latency).
 
 ### `options`
 
@@ -105,9 +107,9 @@ These control the behavior of Eltern-Emailer.
 
 * `emailTo` The recipient of all emails sent by the application. Specify only the address, not the real name. This will typically be a parent's email address, or an address that forwards to both parents.
 * `emailFrom` The sender used for all emails sent by the application. Specify only the address, not the name. This is where bounced emails are delivered to, e.g. when the recipient's mailbox is full. It can be the same as `emailTo`, or the address of the person maintaining the Eltern-Emailer installation. Note that bounced emails contain the full content, i.e. sensitive personal information.
-* `imapEnabled`: Check the IMAP inbox specified under [`imap`](#imap). See [Sending Messages to Teachers](#sending-messages-to-teachers) and [Reducing Latency](#reducing-latency).
-* `imapEmail`: The email address of the IMAP inbox. This allows replying to threads with teachers by email.
-* `checkIntervalMinutes` How frequently the Eltern-Portal website is checked for new content. This is the maximum latency emails sent by Eltern-Emailer have relative to the content becoming visible online. Please keep this value at the default of 30 minutes (or higher) to limit traffic to the site.
+* `incomingEmailEnabled`: Check the IMAP inbox specified under [`imap`](#imap). See [Sending Messages to Teachers](#sending-messages-to-teachers) and [Reducing Latency](#reducing-latency).
+* `incomingEmailAddressForForwarding`: The email address of the IMAP inbox. This allows replying to threads with teachers by email.
+* `checkIntervalMinutes` How frequently the Eltern-Portal website is checked for new content. This determines the maximum latency emails sent by Eltern-Emailer have relative to the content becoming visible online. Please keep this value at the default of 30 minutes (or higher) to limit traffic to the site.
 * `smtpWaitSeconds` Time to wait between sending emails. SMTP servers typically reject messages when they are enqueued too quickly.
 * `once` Run only once and terminate. By default the application keeps running, rechecking every `checkIntervalMinutes`.
 * `mute` Don't actually send emails, but update state. The next run will consider all messages sent. Useful to avoid email flood on first run.
@@ -116,11 +118,11 @@ These control the behavior of Eltern-Emailer.
 
 ### Sending Messages to Teachers
 
-Eltern-Emailer can receive emails from you and forward them to teachers via the web portal. This requires a dedicated email account accessible via IMAP (see [`imap`](#imap) above). The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. GMail is known to work.
+Eltern-Emailer can receive emails from you and forward them to teachers via the website. This requires a dedicated email account accessible via IMAP (see [`imap`](#imap) above). The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. GMail is known to work.
 
 #### Protection Against Abuse
 
-There is no authentication of the email sender. A malicious actor could "inject" an email that the application then forwards to a teacher under your name. To make this unlikely, you should choose an email address that is hard to guess, e.g. `qmqztwrp3g2em78qatms@example.com`, and never publish it. In the config file, specify this address under `options.imapEmail`. Note that it will be included in the headers of emails sent to you from Eltern-Emailer, so forwarding such messages with headers would reveal it to the recipient.
+There is no authentication of the email sender. A malicious actor could "inject" an email that the application then forwards to a teacher under your name. To make this unlikely, you should choose an email address that is hard to guess, e.g. `qmqztwrp3g2em78qatms@example.com`, and never publish it. In the config file, specify this address under `options.incomingEmailAddressForForwarding`. Note that it may be included in the headers of emails sent to you from Eltern-Emailer, so forwarding such messages with headers would reveal it to the recipient.
 
 You may want to set up forwarding to this email address, e.g. for notification emails sent to the address you use with the Eltern-Portal (see [below](#reducing-latency)). This latter address may be easy to guess, e.g. `parents@example.com`. To still prevent the above abuse scenario, messages to Eltern-Emailer must be sent directly to the dedicated email address, e.g. `qmqztwrp3g2em78qatms@example.com`, not via forwarding from another address like `parents@example.com`.
 
@@ -136,7 +138,7 @@ Sending an initial email to a teacher requires a per-teacher setup. Visit the te
 
 Eltern-Emailer can check for the notification email sent by the portal whenever a new message is available. This requires a dedicated email account as described [above](#sending-messages-to-teachers).
 
-You should configure the email account you are currently using for the portal to forward notification emails or simply all emails to this new address. Emails that are not notifications (e.g. sick leave confirmations) will also trigger a check, but this is rare and should not cause problems.
+You can simply configure the email account you are currently using for the portal to forward notification emails or simply all emails to this new address. Emails that are not notifications (e.g. sick leave confirmations) will also trigger a check, but this is rare and should not cause problems.
 
 ## Running the Application
 
