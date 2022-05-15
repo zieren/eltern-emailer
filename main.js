@@ -573,8 +573,8 @@ async function processNewEmail() {
         replyThreadId: isReply ? replyThreadId : undefined,
         subject: isReply ? undefined : parsedMessage.subject,
         text: parsedMessage.text,
-        markDone: async () => markEmail(seq, true),
-        markNotDone: singleRecipient ? async () => markEmail(seq, false) : () => {}
+        markDone: async () => markEmail(message.seq, true),
+        markNotDone: singleRecipient ? async () => markEmail(message.seq, false) : () => {}
       });
     }
   }
