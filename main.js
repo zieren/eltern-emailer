@@ -1,13 +1,13 @@
 // TODO: What happens if any of our page interactions fails, e.g. because the element ID changed?
 
-const TITLE = 'Eltern-Emailer 0.0.4 (c) 2022 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.0.5 (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
 const https = require('https');
 const fs = require('fs');
 const { ImapFlow } = require('imapflow');
-const md5 = require("md5");
+const md5 = require('md5');
 const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
 const { simpleParser } = require('mailparser');
@@ -70,7 +70,15 @@ let CONFIG = {}, LOG = null;
 let imapClient = null;
 /** Synchronization between IMAP event listener and main loop. */
 let awake = () => {}; // Event handler may fire before the main loop builds the wait Promise.
-/** Outbound messages received asynchronously. */
+/** 
+ * Outbound messages received asynchronously. Each has a "prep" handler that must complete 
+ * successfully before actually sending. This handler will mark the original email that triggered
+ * this message as answered in IMAP to avoid duplicate messages to teachers in case of errors (e.g.
+ * when the message to the teacher is sent, but the email in the IMAP inbox cannot be marked
+ * processed). Using an IMAP flag instead of the status file has the downside that it cannot express
+ * partial success, but that is a rare case anyway. On the upside the IMAP flag will persist across
+ * reinstalls or deletion of the status file.
+ */
 let outbox = [];
 /** Wrap logger for IMAP, stripping all fields except msg. */
 const imapLogger = {
@@ -103,11 +111,11 @@ function processFlags(flags) {
 function createIncomingEmailRegExp() {
   if (CONFIG.options.incomingEmailAddressForForwarding) {
     CONFIG.options.incomingEmailRegEx =
-        '(^|<)' 
+        '(?:^|<)' 
         + CONFIG.options.incomingEmailAddressForForwarding
             .replace(/\./g, '\\.')
-            .replace('@', '(\\+\\d+)?@') 
-        + '($|>)';
+            .replace('@', '(?:\\+(\\d+))?@') 
+        + '(?:$|>)';
   }
 }
 
@@ -158,7 +166,7 @@ async function login(page) {
 
 async function getPhpSessionIdAsCookie(page) {
   const cookies = await page.cookies();
-  const id = cookies.filter(c => c.name === "PHPSESSID");
+  const id = cookies.filter(c => c.name === 'PHPSESSID');
   if (id.length !== 1) {
     throw 'Failed to extract PHPSESSID';
   }
@@ -338,7 +346,8 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
             email.references = [buildMessageId(messageIdBase + (i - 1))];
           }
           if (CONFIG.options.incomingEmailAddressForForwarding) {
-            email.replyTo = CONFIG.options.incomingEmailAddressForForwarding;
+            email.replyTo = CONFIG.options.incomingEmailAddressForForwarding
+                .replace('@', '+' + teacher.id + '@');
           }
           emails.push({
             // We don't forge the date here because time of day is not available.
@@ -517,70 +526,56 @@ async function processNewEmail() {
 
     const parsedMessage = await simpleParser(message.source);
     
-    // The portal doesn't support CC. It's safe to assume the intent is to have the messagse
-    // delivered to CC recipients just the same. BCC is not supported: For replies it doesn't
-    // make sense, and for an initial email we need the address to extract the teacher ID.
-    const values = [].concat(
-      parsedMessage.to ? parsedMessage.to.value : [],
-      parsedMessage.cc ? parsedMessage.cc.value : []);
-    
-    // The user may have set up forwarding from some easy-to-guess address, e.g. the one 
-    // initially registered with the portal. To be safe we check for the hard-to-guess address
-    // in To/Cc.
-    if (!values.find(
-        value => value.address && value.address.match(CONFIG.options.incomingEmailRegEx))) {
-      continue;
+    const recipients = [].concat(
+        parsedMessage.to ? parsedMessage.to.value : [],
+        // The portal doesn't support the concept of multiple recipients, but we do. We treat To:
+        // and Cc: the same.
+        parsedMessage.cc ? parsedMessage.cc.value : [])
+        // The user may have set up forwarding from some easy-to-guess address (e.g. the one
+        // initially registered with the portal), exposing the address to spam or pranks. To be safe
+        // we check for the secret, hard-to-guess address.
+        .filter(value => value.address && value.address.match(CONFIG.options.incomingEmailRegEx));
+
+    if (!recipients.length) {
+      continue; // The message isn't intended for us.
     }
+
+    // The 99% case. This allows marking the message not-done on failure because we can just retry
+    // from scratch. (In the >1 case it is also possible that all recipients fail, but this seems
+    // too rare to special case.)
+    const singleRecipient = recipients.length === 1;
 
     // For replies we get the teacher ID and thread ID from the In-Reply-To header, and we don't
-    // need a subject. Check this case first because it's easy to detect.
-    if (parsedMessage.inReplyTo && parsedMessage.inReplyTo.startsWith('<thread-')) {
+    // need a subject. Other teachers may be among the recipients though, for these a new thread is
+    // created.
+    [_, replyTeacherId, replyThreadId] =
+        parsedMessage.inReplyTo && parsedMessage.inReplyTo.startsWith('<thread-')
+        ? parsedMessage.inReplyTo.split('-')
+        : [0, -1, -1];
+
+    for (const recipient of recipients) {
+      const teacherId = recipient.address.match(CONFIG.options.incomingEmailRegEx)[1];
+      if (!teacherId) { // This still allows testing with "0" because it's a string.
+        LOG.warn('Failed to parse recipient "' + recipient.address + '"');
+        continue; // Should never happen because we filtered recipients to match the RegEx above.
+      }
+
+      // We now know that the message has payload. The prep handler below will mark it done.
       delete ignoredMessages[message.seq];
-      [_, teacherId, threadId] = parsedMessage.inReplyTo.split('-');
+
+      const isReply = teacherId == replyTeacherId;
       LOG.info(
-          'Received email for teacher ' + teacherId + ': Reply to thread ' + threadId
-          + ' (' + parsedMessage.text.length + ' characters)');
+        'Received ' + (isReply ? 'reply to ' : 'email for ') + recipient.name + ' (teacher ' 
+        + teacherId + '): "' + parsedMessage.subject + '" (' + parsedMessage.text.length 
+        + ' characters)');
       outbox.push({
         teacherId: teacherId,
-        threadId: threadId,
+        replyThreadId: isReply ? replyThreadId : undefined,
+        subject: isReply ? undefined : parsedMessage.subject,
         text: parsedMessage.text,
-        ok: async () => {
-          await imapClient.messageFlagsAdd({ seq: message.seq }, ['\\Answered']);
-          LOG.debug('Marked email processed: ' + message.seq);
-        }
+        markDone: async () => markEmail(seq, true),
+        markNotDone: singleRecipient ? async () => markEmail(seq, false) : () => {}
       });
-      continue;
-    }
-    // It's not a valid reply, but could be a valid initial message. Go through all recipients and
-    // check each one for subaddressing.
-
-    for (let i = 0; i < values.length; ++i) {
-      const value = values[i];
-      // Handle "undisclosed-recipients" (no address) and invalid address.
-      if (!value.address || !value.address.includes('@')) {
-        continue;
-      }
-      const [_, teacherId] = value.address.split('@', 2)[0].split('+', 2);
-      if (teacherId) {
-        delete ignoredMessages[message.seq];
-        LOG.info(
-            'Received email for teacher ' + teacherId + ' (' + value.name + '): "'
-            + parsedMessage.subject + '" (' + parsedMessage.text.length + ' characters)');
-        outbox.push({
-          teacherId: teacherId,
-          subject: parsedMessage.subject,
-          text: parsedMessage.text,
-          // Messages can have multiple recipients. The outbox is processed in order. For each
-          // incoming email, the last outbound message produced from that email should mark the
-          // email processed.
-          ok: i === values.length - 1
-              ? async () => {
-                  await imapClient.messageFlagsAdd({ seq: message.seq }, ['\\Answered']);
-                  LOG.debug('Marked email processed: ' + message.seq);
-                }
-              : () => {}
-        });
-      }
     }
   }
   LOG.debug('New emails: ' + numNewMessages);
@@ -588,13 +583,23 @@ async function processNewEmail() {
   if (Object.keys(ignoredMessages).length) {
     const seqs = Object.keys(ignoredMessages).join();
     await imapClient.messageFlagsAdd({seq: seqs}, ['\\Answered']);
-    LOG.debug('Marking other emails processed: ' + seqs);
+    LOG.debug('Marked other emails: ' + seqs);
   }
 
   // For simplicity we awake unconditionally. We don't distinguish between new content notifications
   // and ignored messages, e.g. sick leave confirmation. An occasional false positive is OK.
   if (numNewMessages) {
     awake();
+  }
+}
+
+async function markEmail(seq, done) {
+  if (done) {
+    await imapClient.messageFlagsAdd({ seq: seq }, ['\\Answered']);
+    LOG.debug('Marked processed email: ' + seq);
+  } else {
+    await imapClient.messageFlagsRemove({ seq: seq }, ['\\Answered']);
+    LOG.debug('Marked unprocessed email: ' + seq);
   }
 }
 
@@ -607,33 +612,31 @@ async function sendMessagesToTeachers(page) {
     // actually send messages that we can then retrieve by navigating to the URL directly. This
     // greatly simplifies testing :-)
 
-    if (msg.subject) { // not a reply
+    if (msg.replyThreadId) {
+      await page.goto(
+          CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/'
+          + msg.teacherId + '/_/' + msg.replyThreadId);
+      // We probably don't need load_all=1 here, assuming the reply box is always shown.
+    } else {
       await page.goto(
           CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/' + msg.teacherId);
       await page.type('#new_betreff', msg.subject);
-    } else { // a reply
-      await page.goto(
-          CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/'
-          + msg.teacherId + '/_/' + msg.threadId);
-      // We probably don't need load_all=1 here, assuming the reply box is always shown.
     }
     // TODO: Split up if >512 chars. (Is that configurable?)
     await page.type('#nachricht_kom_fach', msg.text);
+    // We mark the original email early to avoid duplicate messages in case of errors.
+    await msg.markDone();
     const [response] = await Promise.all([
       page.waitForNavigation(),
       page.click('button#send')
     ]);
 
     if (response.ok()) {
-      // TODO: Can we take precautions that this doesn't fail? If it does we'll flood the teacher.
-      // Maybe we do have to do it first? Maybe use the state file instead, so that failure is
-      // unlikely.
       LOG.info('Sent message to teacher ' + msg.teacherId);
-      await msg.ok();
     } else {
-      // TODO: Report this back, i.e. email the error to the user. We probably still want to unqueue
-      // this message.
       LOG.error('Failed to send message to teacher ' + msg.teacherId + ': ' + response.statusText);
+      await msg.markNotDone();
+      // TODO: Report this back, i.e. email the error to the user.
     }
   }
   outbox = [];
@@ -755,6 +758,7 @@ async function main() {
 };
 
 main().catch(e => {
+  LOG.error('Main loop exited with the following error:');
   LOG.error(e);
   LOG.error(e.stack);
   if (imapClient) {

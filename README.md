@@ -128,7 +128,7 @@ You may want to set up forwarding to this email address, e.g. for notification e
 
 #### Replying to a Teacher
 
-When you receive an email for a thread in `Kommunikation Eltern/Fachlehrer` you can simply reply to it. Eltern-Emailer encodes the teacher and thread ID in the message ID and will extract them from the reply.
+When you receive an email for a thread in `Kommunikation Eltern/Fachlehrer` you can simply reply to it. Eltern-Emailer encodes the teacher and thread ID in the message ID and will extract them from the reply. You can add other teachers to the To: or Cc: headers, which will open a new thread with them.
 
 #### Initial Email to a Teacher
 
