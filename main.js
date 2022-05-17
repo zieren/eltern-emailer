@@ -1,6 +1,4 @@
-// TODO: What happens if any of our page interactions fails, e.g. because the element ID changed?
-
-const TITLE = 'Eltern-Emailer 0.0.5 (c) 2022 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.1.0 (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
@@ -50,7 +48,14 @@ const CLI_OPTIONS = {
   ]
 };
 
-const EMPTY_STATE = {threads: {}, announcements: {}, inquiries: {}, hashes: {subs: ''}};
+const EMPTY_STATE = {
+  threads: {}, 
+  announcements: {},
+  inquiries: {}, 
+  hashes: {
+    subs: '',
+    notices: {}
+  }};
 const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
 
 /**
@@ -61,6 +66,19 @@ const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
  * - 'hashes': Other content, e.g. "Vertretungsplan"
  */
 const STATE_FILE = 'state.json';
+
+// ---------- Retry throttling ----------
+
+/** Seconds to wait after a failure, assuming no recent previous failure. */
+const DEFAULT_RETRY_WAIT_SECONDS = 60; // 1m
+/** If the last failure was less than this ago, back off exponentially. */
+const BACKOFF_TRIGGER_SECONDS = 60 * 60; // 1h
+/** Maximum time to wait in exponential backoff. */
+const MAX_RETRY_WAIT_SECONDS = 60 * 60; // 1h
+/** Retry wait time for the last error. */
+let retryWaitSeconds = DEFAULT_RETRY_WAIT_SECONDS;
+/** Timestamp of the last error. */
+let lastFailureEpochMillis = 0;
 
 // ---------- Shared state ----------
 
@@ -93,7 +111,7 @@ const imapLogger = {
 function readState() {
   const state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) : {};
   for (const [key, value] of Object.entries(EMPTY_STATE)) {
-    state[key] = state[key] || value; // Netbeans syntax check chokes on ||= :-|
+    state[key] ||= value;
   }
   return state;
 }
@@ -430,6 +448,31 @@ async function readSubstitutions(page, previousHashes, emails) {
   LOG.info('Found substitution plan update');
 }
 
+// ---------- Notice board ----------
+
+async function readNoticeBoard(page, previousHashes, emails) {
+  await page.goto(CONFIG.elternportal.url + '/aktuelles/schwarzes_brett');
+  const gridItemsHTML =
+      await page.$$eval('div.grid-item', (divs) => divs.map(div => div.innerHTML));
+  let newHashes = {};
+  for (const gridItemHTML of gridItemsHTML) {
+    const hash = md5(gridItemHTML);
+    if (previousHashes.notices[hash]) {
+      newHashes[hash] = true;
+      continue;
+    }
+    LOG.info('Found notice board message');
+    newHashes[hash] = false;
+    emails.push({
+      email: buildEmail('Schwarzes Brett', 'Schwarzes Brett', {html: gridItemHTML}),
+      ok: () => { newHashes[hash] = true; }
+    });
+  }
+  // In the new object, existing hashes map to true while newly encountered ones map to false. They
+  // are set to true in the OK handler.
+  previousHashes.notices = newHashes;
+}
+
 // ---------- General email functions ----------
 
 /**
@@ -677,68 +720,61 @@ async function main() {
   }
 
   while (true) {
-    try {
-      // Read state within the loop to allow editing the state file manually without restarting.
-      const state = readState();
-      LOG.debug('Read state: %d announcements, %d threads, %d inquiries, hashes=%s',
-          Object.keys(state.announcements).length,
-          Object.keys(state.threads).length,
-          Object.keys(state.inquiries).length,
-          JSON.stringify(state.hashes));
-      const browser = await puppeteer.launch();
-      const page = await browser.newPage();
+    // Read state within the loop to allow editing the state file manually without restarting.
+    const state = readState();
+    LOG.debug('Read state: %d announcements, %d threads, %d inquiries, hashes=%s',
+        Object.keys(state.announcements).length,
+        Object.keys(state.threads).length,
+        Object.keys(state.inquiries).length,
+        JSON.stringify(state.hashes));
+    const browser = await puppeteer.launch();
+    const page = await browser.newPage();
 
-      await login(page);
-      const emails = [];
+    await login(page);
+    const emails = [];
 
-      // Send messages to teachers. We later retrieve those messages when crawling threads below.
-      await sendMessagesToTeachers(page);
+    // Send messages to teachers. We later retrieve those messages when crawling threads below.
+    await sendMessagesToTeachers(page);
 
-      // Section "Aktuelles".
-      const announcements = await readAnnouncements(page); // Always reads all.
-      await readAttachments(page, announcements, state.announcements);
-      buildEmailsForAnnouncements(page, announcements, state.announcements, emails);
+    // Section "Aktuelles".
+    const announcements = await readAnnouncements(page); // Always reads all.
+    await readAttachments(page, announcements, state.announcements);
+    buildEmailsForAnnouncements(page, announcements, state.announcements, emails);
 
-      // Section "Kommunikation Eltern/Klassenleitung".
-      const inquiries = await readInquiries(page);
-      buildEmailsForInquiries(inquiries, state.inquiries, emails);
+    // Section "Kommunikation Eltern/Klassenleitung".
+    const inquiries = await readInquiries(page);
+    buildEmailsForInquiries(inquiries, state.inquiries, emails);
 
-      // Section "Kommunikation Eltern/Fachlehrer".
-      const teachers = await readActiveTeachers(page);
-      await readThreadsMeta(page, teachers);
-      await readThreadsContents(page, teachers);
-      buildEmailsForThreads(teachers, state.threads, emails);
+    // Section "Kommunikation Eltern/Fachlehrer".
+    const teachers = await readActiveTeachers(page);
+    await readThreadsMeta(page, teachers);
+    await readThreadsContents(page, teachers);
+    buildEmailsForThreads(teachers, state.threads, emails);
 
-      // Section "Vertretungsplan"
-      await readSubstitutions(page, state.hashes, emails);
+    // Section "Vertretungsplan"
+    await readSubstitutions(page, state.hashes, emails);
 
-      // Send emails to user.
-      if (CONFIG.options.test) {
-        await sendEmails(createTestEmails(emails.length));
-        // Don't update state.
-      } else {
-        await sendEmails(emails);
-        fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+    // Section "Schwarzes Brett"
+    await readNoticeBoard(page, state.hashes, emails);
+
+    // Send emails to user.
+    if (CONFIG.options.test) {
+      await sendEmails(createTestEmails(emails.length));
+      // Don't update state.
+    } else {
+      await sendEmails(emails);
+      fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+    }
+
+    // Only close after OK handlers have run.
+    await browser.close();
+
+    if (CONFIG.options.once) {
+      LOG.info('Terminating due to --once flag/option');
+      if (imapClient) {
+        await imapClient.logout();
       }
-
-      // Only close after OK handlers have run.
-      await browser.close();
-
-      if (CONFIG.options.once) {
-        LOG.info('Terminating due to --once flag/option');
-        if (imapClient) {
-          await imapClient.logout();
-        }
-        break;
-      }
-    } catch (e) {
-      LOG.error(e);
-      if (page) {
-        LOG.error('URL of this error: ' + page.url());
-        await page.screenshot({ path: 'last_error.png', fullPage: true });
-        LOG.error('Screenshot stored in last_error.png');
-      }
-      // TODO: Detect permanent errors and quit.
+      break;
     }
 
     // Wait until timeout or email received.
@@ -757,11 +793,26 @@ async function main() {
   }
 };
 
-main().catch(e => {
-  LOG.error('Main loop exited with the following error:');
-  LOG.error(e);
-  LOG.error(e.stack);
-  if (imapClient) {
-    imapClient.close(); // logout() doesn't work when an operation is in progress
+(async () => {
+  while (true) {
+    await main().catch(e => {
+      LOG.error('Main loop exited with the following error:');
+      LOG.error(e);
+      LOG.error(e.stack);
+      if (imapClient) {
+        imapClient.close(); // logout() doesn't work when an operation is in progress
+      }
+    });
+    const nowEpochMillis = Date.now();
+    const secondsSinceLastFailure = (nowEpochMillis - lastFailureEpochMillis) / 1000;
+    LOG.debug('Last failure was ' + secondsSinceLastFailure + ' seconds ago');
+    if (secondsSinceLastFailure > BACKOFF_TRIGGER_SECONDS) { // reset wait time
+      retryWaitSeconds = DEFAULT_RETRY_WAIT_SECONDS;
+    } else { // exponential backoff
+      retryWaitSeconds =  Math.min(retryWaitSeconds * 2, MAX_RETRY_WAIT_SECONDS); 
+    }
+    lastFailureEpochMillis = nowEpochMillis;
+    LOG.info('Waiting ' + retryWaitSeconds + ' seconds before retry');
+    await sleepSeconds(retryWaitSeconds);
   }
-});
+})();
