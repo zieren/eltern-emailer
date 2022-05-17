@@ -45,12 +45,12 @@ The following sections in the web UI are supported:
 * `Kommunikation Eltern/Fachlehrer`
 * `Kommunikation Eltern/Klassenleitung`
 * `Klassen Vertretungsplan`
+* `Schwarzes Brett`
 
 ### Planned Features
 
 The following sections are on my radar (roughly in order of priority):
 
-* `Schwarzes Brett`
 * `Schulaufgaben / Weitere Termine`
 
 Schools use different feature subsets of the portal. If a feature is missing for your school, let me know or, even better, contribute code.
