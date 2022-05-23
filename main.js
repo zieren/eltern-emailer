@@ -1,4 +1,4 @@
-const TITLE = 'Eltern-Emailer 0.1.0 (c) 2022 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.2.0 (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
@@ -651,35 +651,68 @@ async function markEmail(seq, done) {
 async function sendMessagesToTeachers(page) {
   LOG.info('Sending ' + outbox.length + ' messages to teachers');
   for (const msg of outbox) {
-    // Curiously this navigation will always succeed, even for nonexistent IDs. What's more, we can
-    // actually send messages that we can then retrieve by navigating to the URL directly. This
+    // Curiously navigation will always succeed, even for nonexistent teacher IDs. What's more, we
+    // can actually send messages that we can then retrieve by navigating to the URL directly. This
     // greatly simplifies testing :-)
 
-    if (msg.replyThreadId) {
-      await page.goto(
-          CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/'
-          + msg.teacherId + '/_/' + msg.replyThreadId);
-      // We probably don't need load_all=1 here, assuming the reply box is always shown.
-    } else {
-      await page.goto(
-          CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/' + msg.teacherId);
-      await page.type('#new_betreff', msg.subject);
-    }
-    // TODO: Split up if >512 chars. (Is that configurable?)
-    await page.type('#nachricht_kom_fach', msg.text);
-    // We mark the original email early to avoid duplicate messages in case of errors.
-    await msg.markDone();
-    const [response] = await Promise.all([
-      page.waitForNavigation(),
-      page.click('button#send')
-    ]);
+    // In case of multiple messages we prefix them with "[n/N] ". Assuming that n and N have at most
+    // 2 characters, we simply substract 8 characters for every such prefix.
+    // TODO: Extract magic 512? Is that maybe even configurable?
+    const capacity = msg.text.length <= 512 ? 512 : (512 - 8);
+    const numMessages = Math.ceil(msg.text.length / capacity);
+    let onReplyPage = false;
+    for (let i = 0; i < numMessages; i++) {
+      if (msg.replyThreadId) {
+        if (!onReplyPage) {
+          await page.goto(
+              CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/'
+              + msg.teacherId + '/_/' + msg.replyThreadId);
+          // We probably don't need load_all=1 here, assuming the reply box is always shown.
+          onReplyPage = true; // The form remains available after posting the reply.
+        } // else: We're already on the reply page.
+      } else { // create a new thread
+        await page.goto(
+            CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/' + msg.teacherId);
+        await page.type('#new_betreff', msg.subject);
+      }
 
-    if (response.ok()) {
-      LOG.info('Sent message to teacher ' + msg.teacherId);
-    } else {
-      LOG.error('Failed to send message to teacher ' + msg.teacherId + ': ' + response.statusText);
-      await msg.markNotDone();
-      // TODO: Report this back, i.e. email the error to the user.
+      const prefix = numMessages == 1 ? '' : '[' + (i + 1) + '/' + numMessages + '] ';
+      const logInfix = numMessages == 1 ? '' : ' part ' + (i + 1) + '/' + numMessages;
+      await page.type(
+          '#nachricht_kom_fach', prefix + msg.text.substring(i * capacity, (i + 1) * capacity));
+
+      // We mark the original email done before actually submitting the form to avoid duplicate 
+      // messages in case of errors.
+      if (i == 0) {
+        await msg.markDone();
+      }
+
+      // Click the button to do the thing.
+      const [response] = await Promise.all([
+        page.waitForNavigation(),
+        page.click('button#send')
+      ]);
+
+      if (response.ok()) {
+        LOG.info('Sent message' + logInfix + ' to teacher ' + msg.teacherId);
+        // The new thread is the first shown on the response page. Extract its ID and treat the
+        // remaining parts as replies. The form shown on the response page is NOT associated with
+        // this thread, but would open a new thread.
+        if (numMessages > 1 && !msg.replyThreadId) {
+          msg.replyThreadId = await page.$eval(
+            'a[href*="meldungen/kommunikation_fachlehrer/"',
+            (a) => a.href.match(/.*\/([0-9]+)$/)[1]);
+        }
+      } else {
+        // TODO: Report this back, i.e. email the error to the user.
+        LOG.error(
+            'Failed to send message ' + prefix + 'to teacher ' + msg.teacherId 
+            + ': ' + response.statusText);
+        // If we haven't posted any messages yet, we can retry this email.
+        if (i == 0) {
+          await msg.markNotDone();
+        }
+      }
     }
   }
   outbox = [];
