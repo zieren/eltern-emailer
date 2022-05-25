@@ -120,6 +120,8 @@ These control the behavior of Eltern-Emailer.
 
 Eltern-Emailer can receive emails from you and forward them to teachers via the website. This requires a dedicated email account accessible via IMAP (see [`imap`](#imap) above). The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. GMail is known to work.
 
+The message size limit enforced by the website does not apply here. If your email is longer than 512 characters (I'm not sure if all schools use the same limit; currently this value is hardcoded), it is split up.
+
 #### Protection Against Abuse
 
 There is no authentication of the email sender. A malicious actor could "inject" an email that the application then forwards to a teacher under your name. To make this unlikely, you should choose an email address that is hard to guess, e.g. `qmqztwrp3g2em78qatms@example.com`, and never publish it. In the config file, specify this address under `options.incomingEmailAddressForForwarding`. Note that it may be included in the headers of emails sent to you from Eltern-Emailer, so forwarding such messages with headers would reveal it to the recipient.
