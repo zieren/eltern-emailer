@@ -93,7 +93,7 @@ These parameters are used to log into the Eltern-Portal.
 
 ### `smtp`
 
-These parameters configure the SMTP transport in the Nodemailer module. The full set of options described in the [Nodemailer documentation](https://nodemailer.com/smtp/) is available. The default values for `port` (465) and `secure` (true) work well for many servers (e.g. GMail), but yours may require different settings.
+These parameters configure the SMTP transport in the Nodemailer module. The full set of options described in the [Nodemailer documentation](https://nodemailer.com/smtp/) is available. The default values for `port` (465) and `secure` (true) work well for many servers (e.g. Outlook), but yours may require different settings.
 
 ### `imap`
 
@@ -118,9 +118,9 @@ These control the behavior of Eltern-Emailer.
 
 ### Sending Messages to Teachers
 
-Eltern-Emailer can receive emails from you and forward them to teachers via the website. This requires a dedicated email account accessible via IMAP (see [`imap`](#imap) above). The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. GMail is known to work.
+Eltern-Emailer can receive emails from you and forward them to teachers via the website. This requires a dedicated email account accessible via IMAP (see [`imap`](#imap) above). The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. Outlook is known to work. GMail does not work because it does not support password login.
 
-The message size limit enforced by the website does not apply here. If your email is longer than 512 characters (I'm not sure if all schools use the same limit; currently this value is hardcoded), it is split up.
+The message size limit enforced by the website does not apply here. If your email is longer than 512 characters (I'm not sure if all schools use the same limit; currently this value is hardcoded), it is automatically split up.
 
 #### Protection Against Abuse
 
