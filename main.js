@@ -132,7 +132,7 @@ function createIncomingEmailRegExp() {
         '(?:^|<)' 
         + CONFIG.options.incomingEmailAddressForForwarding
             .replace(/\./g, '\\.')
-            .replace('@', '(?:\\+(\\d+))?@') 
+            .replace('@', '(?:\\+(\\d+))@') // tag is mandatory
         + '(?:$|>)';
   }
 }
@@ -626,7 +626,7 @@ async function processNewEmail() {
   if (Object.keys(ignoredMessages).length) {
     const seqs = Object.keys(ignoredMessages).join();
     await imapClient.messageFlagsAdd({seq: seqs}, ['\\Answered']);
-    LOG.debug('Marked other emails: ' + seqs);
+    LOG.debug('Marked ignored emails: ' + seqs);
   }
 
   // For simplicity we awake unconditionally. We don't distinguish between new content notifications
