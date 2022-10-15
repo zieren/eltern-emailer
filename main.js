@@ -525,7 +525,7 @@ function buildEmail(fromName, subject, options) {
 // ---------- Email sending ----------
 
 async function sendEmails(emails) {
-  LOG.info('Sending %d emails', emails.length);
+  LOG.info('Sending %d email(s)', emails.length);
   if (!emails.length) {
     return;
   }
