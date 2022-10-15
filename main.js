@@ -2,6 +2,7 @@ const TITLE = 'Eltern-Emailer 0.2.0 (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
+const { exit } = require('process');
 const https = require('https');
 const fs = require('fs');
 const { ImapFlow } = require('imapflow');
@@ -728,16 +729,18 @@ async function main() {
   const {_, flags} = parser.parse(process.argv.slice(2));
 
   CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
-  CONFIG.options.checkIntervalMinutes = Math.max(CONFIG.options.checkIntervalMinutes, 10);
-  processFlags(flags);
-  createIncomingEmailRegExp();
   LOG = createLogger();
   LOG.info(TITLE);
 
   // Ensure config file has been edited.
   if (CONFIG.elternportal.url.startsWith('https://SCHOOL.')) {
-    throw 'Please edit the config file to specify your login credentials, SMTP server etc.';
+    LOG.error('Please edit the config file to specify your login credentials, SMTP server etc.');
+    return 2;
   }
+
+  CONFIG.options.checkIntervalMinutes = Math.max(CONFIG.options.checkIntervalMinutes, 10);
+  processFlags(flags);
+  createIncomingEmailRegExp();
 
   // Start IMAP listener, if enabled.
   if (CONFIG.options.incomingEmailEnabled) {
@@ -808,7 +811,7 @@ async function main() {
       if (imapClient) {
         await imapClient.logout();
       }
-      break;
+      return 0;
     }
 
     // Wait until timeout or email received.
@@ -836,7 +839,10 @@ async function main() {
       if (imapClient) {
         imapClient.close(); // logout() doesn't work when an operation is in progress
       }
+    }).then((err) => {
+      exit(err);
     });
+
     const nowEpochMillis = Date.now();
     const secondsSinceLastFailure = (nowEpochMillis - lastFailureEpochMillis) / 1000;
     LOG.debug('Last failure was ' + secondsSinceLastFailure + ' seconds ago');
