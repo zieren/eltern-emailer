@@ -526,6 +526,7 @@ async function sendEmails(emails) {
     }
     // Throttle outgoing emails.
     if (!first) {
+      LOG.info('Waiting ' + CONFIG.options.smtpWaitSeconds + ' seconds between messages');
       await sleepSeconds(CONFIG.options.smtpWaitSeconds);
     }
     first = false;
@@ -847,5 +848,6 @@ async function main() {
     lastFailureEpochMillis = nowEpochMillis;
     LOG.info('Waiting ' + retryWaitSeconds + ' seconds before retry');
     await sleepSeconds(retryWaitSeconds);
+    LOG.debug('Waiting completed');
   }
 })();
