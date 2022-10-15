@@ -106,6 +106,7 @@ IMAP support is optional and must be turned on via `incomingEmailEnabled` in the
 These control the behavior of Eltern-Emailer.
 
 * `emailTo` The recipient of all emails sent by the application. Specify only the address, not the real name. This will typically be a parent's email address, or an address that forwards to both parents.
+* `emailToKid` The kid's email address (optional; may be empty). If set, information intended for the kid (currently only substitution plan updates, but possibly more in future versions) will be sent to this address.
 * `emailFrom` The sender used for all emails sent by the application. Specify only the address, not the name. This is where bounced emails are delivered to, e.g. when the recipient's mailbox is full. It can be the same as `emailTo`, or the address of the person maintaining the Eltern-Emailer installation. Note that bounced emails contain the full content, i.e. sensitive personal information.
 * `incomingEmailEnabled`: Check the IMAP inbox specified under [`imap`](#imap). See [Sending Messages to Teachers](#sending-messages-to-teachers) and [Reducing Latency](#reducing-latency).
 * `incomingEmailAddressForForwarding`: The email address of the IMAP inbox. This allows replying to threads with teachers by email.

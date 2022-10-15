@@ -23,8 +23,9 @@
     }
   },
   "options": {
-    "emailTo": "PARENT(S) EMAIL ADDRESS",
     "emailFrom": "RETURN EMAIL ADDRESS",
+    "emailTo": "PARENT(S) EMAIL ADDRESS",
+    "emailToKid": "KID EMAIL ADDRESS (OPTIONAL; EMPTY TO DISABLE)",
     "incomingEmailEnabled": true,
     "incomingEmailAddressForForwarding": "IMAP EMAIL ADDRESS",
     "checkIntervalMinutes": 30,

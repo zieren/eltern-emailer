@@ -55,6 +55,7 @@ const EMPTY_STATE = {
   inquiries: {}, 
   hashes: {
     subs: '',
+    subsKid: '',
     notices: {}
   }};
 const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
@@ -435,17 +436,28 @@ async function readSubstitutions(page, previousHashes, emails) {
   await page.goto(CONFIG.elternportal.url + '/service/vertretungsplan');
   const originalHTML = await page.$eval('div#asam_content', (div) => div.innerHTML);
   const hash = md5(originalHTML);
-  if (hash === previousHashes.subs) {
+  const doParent = hash !== previousHashes.subs;
+  const doKid = !!CONFIG.options.emailToKid && hash !== previousHashes.subsKid;
+  if (!doParent && !doKid) {
     return;
   }
 
   const modifiedHTML = '<!DOCTYPE html><html><head><title>Vertretungsplan</title>'
       + '<style>table, td { border: 1px solid; } img { display: none; }</style></head>'
       + '<body>' + originalHTML + '</body></html>';
-  emails.push({
-    email: buildEmail('Vertretungsplan', 'Vertretungsplan', {html: modifiedHTML}),
-    ok: () => { previousHashes.subs = hash; }
-  });
+  if (doParent) {
+    emails.push({
+      email: buildEmail('Vertretungsplan', 'Vertretungsplan', {html: modifiedHTML}),
+      ok: () => { previousHashes.subs = hash; }
+    });
+  }
+  if (doKid) {
+    emails.push({
+      email: buildEmail('Vertretungsplan', 'Vertretungsplan', 
+                 {html: modifiedHTML, to: CONFIG.options.emailToKid}),
+      ok: () => { previousHashes.subsKid = hash; }
+    });
+  }
   LOG.info('Found substitution plan update');
 }
 
@@ -503,11 +515,11 @@ function createTestEmails(numEmails) {
  * addresses are incorrect.
  */
 function buildEmail(fromName, subject, options) {
-  return {...options, ...{
+  return {...{
     from: '"' + fromName.replace(/["\n]/g, '') + ' (EE)" <' + CONFIG.options.emailFrom + '>',
     to: CONFIG.options.emailTo,
     subject: subject
-  }};
+  }, ...options};
 }
 
 // ---------- Email sending ----------
@@ -521,7 +533,7 @@ async function sendEmails(emails) {
   let first = true;
   for (const e of emails) {
     if (CONFIG.options.mute) {
-      LOG.info('Not sending email "%s"', e.email.subject);
+      LOG.info('Not sending email "%s" to %s', e.email.subject, e.email.to);
       await e.ok();
       continue;
     }
@@ -531,7 +543,7 @@ async function sendEmails(emails) {
       await sleepSeconds(CONFIG.options.smtpWaitSeconds);
     }
     first = false;
-    LOG.info('Sending email "%s"', e.email.subject);
+    LOG.info('Sending email "%s" to %s', e.email.subject, e.email.to);
     // Wait for the callback to run.
     const ok = await new Promise((resolve) => {
       transport.sendMail(e.email, (error, info) => {
