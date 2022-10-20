@@ -25,9 +25,10 @@
   "options": {
     "emailFrom": "RETURN EMAIL ADDRESS",
     "emailTo": "PARENT(S) EMAIL ADDRESS",
-    "emailToKid": "KID EMAIL ADDRESS (OPTIONAL; EMPTY TO DISABLE)",
+    "emailToStudent": "STUDENT EMAIL ADDRESS (OPTIONAL; EMPTY TO DISABLE)",
     "incomingEmailEnabled": true,
     "incomingEmailAddressForForwarding": "IMAP EMAIL ADDRESS",
+    "eventLookaheadDays": 7,
     "checkIntervalMinutes": 30,
     "smtpWaitSeconds": 5,
     "logLevel": "debug",

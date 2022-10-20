@@ -1,4 +1,4 @@
-const TITLE = 'Eltern-Emailer 0.2.0 (c) 2022 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.3.0 (c) 2022 Jörg Zieren, GNU GPL v3.'
     + ' See https://github.com/zieren/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
@@ -55,8 +55,8 @@ const EMPTY_STATE = {
   inquiries: {}, 
   hashes: {
     subs: '',
-    subsKid: '',
-    notices: {}
+    notices: {},
+    events: {} // key: hash; value: timestamp
   }};
 const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
 
@@ -112,10 +112,15 @@ const imapLogger = {
 
 function readState() {
   const state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) : {};
-  for (const [key, value] of Object.entries(EMPTY_STATE)) {
-    state[key] ||= value;
-  }
+  setEmptyState(state, EMPTY_STATE);
   return state;
+}
+
+function setEmptyState(state, emptyState) {
+  for (const [key, value] of Object.entries(emptyState)) {
+    state[key] ||= value;
+    setEmptyState(state[key], value); // Recurse for objects.
+  }
 }
 
 function processFlags(flags) {
@@ -437,25 +442,26 @@ async function readSubstitutions(page, previousHashes, emails) {
   const originalHTML = await page.$eval('div#asam_content', (div) => div.innerHTML);
   const hash = md5(originalHTML);
   const doParent = hash !== previousHashes.subs;
-  const doKid = !!CONFIG.options.emailToKid && hash !== previousHashes.subsKid;
-  if (!doParent && !doKid) {
+  const doStudent = doParent && !!CONFIG.options.emailToStudent;
+  if (!doParent && !doStudent) {
     return;
   }
 
   const modifiedHTML = '<!DOCTYPE html><html><head><title>Vertretungsplan</title>'
       + '<style>table, td { border: 1px solid; } img { display: none; }</style></head>'
       + '<body>' + originalHTML + '</body></html>';
+  let emailsLeft = (doParent && doStudent) ? 2 : 1;
   if (doParent) {
     emails.push({
       email: buildEmail('Vertretungsplan', 'Vertretungsplan', {html: modifiedHTML}),
-      ok: () => { previousHashes.subs = hash; }
+      ok: () => { if (!--emailsLeft) previousHashes.subs = hash; }
     });
   }
-  if (doKid) {
+  if (doStudent) {
     emails.push({
       email: buildEmail('Vertretungsplan', 'Vertretungsplan', 
-                 {html: modifiedHTML, to: CONFIG.options.emailToKid}),
-      ok: () => { previousHashes.subsKid = hash; }
+                 {html: modifiedHTML, to: CONFIG.options.emailToStudent}),
+      ok: () => { if (!--emailsLeft) previousHashes.subs = hash; }
     });
   }
   LOG.info('Found substitution plan update');
@@ -484,6 +490,86 @@ async function readNoticeBoard(page, previousHashes, emails) {
   // In the new object, existing hashes map to true while newly encountered ones map to false. They
   // are set to true in the OK handler.
   previousHashes.notices = newHashes;
+}
+
+// ---------- Events ----------
+
+async function readEventsInternal(page, now) {
+  let events = await page.$$eval('table.table2 td:nth-last-child(3)', (tds) => tds.map(td => {
+      // Sometimes date ranges are specified. They may be invalid ("24.12.-23.12.""). We only care
+      // about the start (first) date and ignore the end date.
+      const d = td.innerText.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
+      // The date should always parse. The error (null) case is handled below.
+      const ts = d ? new Date(d[3], d[2] - 1, d[1]).getTime() : null;
+      // Remove year because it's obvious, and use non-breaking hyphen to keep date and time on a
+      // single line for better readability.
+      const compactDateTime = (s) => s.replace(/( |20\d\d)/g, '').replace(/-/g, '&#8209;');
+      const descriptionHTML = 
+          '<tr><td>' + compactDateTime(td.innerText)
+          + '</td><td>&nbsp;' + compactDateTime(td.nextSibling.innerText)
+          + '</td><td>' + td.nextSibling.nextSibling.innerText + '</td></tr>';
+      return {
+        ts: ts, 
+        descriptionHTML: descriptionHTML,
+      };
+      }));
+  // Handle parsing failures here because we don't have the logger in the page context above.
+  events.filter(e => !e.ts).forEach(e => {
+    e.ts = now; // Assume the event is imminent, just to be safe.
+    // We only have the HTML here, but this case should be very rare.
+    LOG.error('Failed to parse date: ' + e.descriptionHTML);
+  });
+  return events.map(e => { return {...e, hash: md5(e.descriptionHTML)};});
+}
+
+async function readEvents(page, previousHashes, emails) {
+  const now = Date.now();
+
+  // Remove expired hashes.
+  Object.entries(previousHashes)
+      .filter(([_, ts]) => ts < now)
+      .forEach(([hash, _]) => delete previousHashes[hash])
+
+  // Read all exams and events.
+  await page.goto(CONFIG.elternportal.url + '/service/termine/liste/schulaufgaben');
+  let events = await readEventsInternal(page, now);
+  await page.goto(CONFIG.elternportal.url + '/service/termine/liste/allgemein');
+  events = events.concat(await readEventsInternal(page, now));
+
+  // Filter those within the lookahead range and not yet processed.
+  let lookaheadDate = new Date(now);
+  // Javascript handles the date wraparound.
+  lookaheadDate.setDate(lookaheadDate.getDate() + CONFIG.options.eventLookaheadDays);
+  const lookahead = lookaheadDate.getTime();
+  const upcomingEvents = 
+      events.filter(e => e.ts >= now && e.ts <= lookahead).sort((a, b) => a.ts - b.ts);
+  const numNewEvents = upcomingEvents.filter(e => !(e.hash in previousHashes)).length;
+
+  // Create emails.
+  if (!numNewEvents) {
+    LOG.debug('No new upcoming events');
+    return;
+  }
+  let emailHTML = '<!DOCTYPE html><html><head><title>Bevorstehende Termine</title>'
+      + '<style>table { border-collapse: collapse; } tr { border-bottom: 1pt solid; }</style>'
+      + '</head><body><h2>Termine in den n&auml;chsten ' + CONFIG.options.eventLookaheadDays
+      + ' Tagen</h2><table>';
+  upcomingEvents.forEach(e => emailHTML += e.descriptionHTML);
+  emailHTML += '</table></body></html>';
+  const doStudent = !!CONFIG.options.emailToStudent;
+  let emailsLeft = doStudent ? 2 : 1;
+  emails.push({
+    email: buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', {html: emailHTML}),
+    ok: () => { if (--emailsLeft) upcomingEvents.forEach(e => previousHashes[e.hash] = e.ts); }
+  });
+  if (doStudent) {
+    emails.push({
+      email: buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', 
+                 {html: emailHTML, to: CONFIG.options.emailToStudent}),
+      ok: () => { if (--emailsLeft) upcomingEvents.forEach(e => previousHashes[e.hash] = e.ts); }
+    });
+  }
+  LOG.info('%d upcoming event(s), of which %d new', upcomingEvents.length, numNewEvents);
 }
 
 // ---------- General email functions ----------
@@ -805,6 +891,9 @@ async function main() {
 
     // Section "Schwarzes Brett"
     await readNoticeBoard(page, state.hashes, emails);
+
+    // Section "Schulaufgaben / Weitere Termine"
+    await readEvents(page, state.hashes.events, emails);
 
     // Send emails to user.
     if (CONFIG.options.test) {

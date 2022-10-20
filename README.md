@@ -2,15 +2,21 @@
 
 Unofficial email interface for `*.eltern-portal.org` sites: 
 
-* Retrieves messages from the website and emails them to you.
-* Receives emails from you and posts them on the website.
+* Retrieves messages from the website and emails them to you (teacher->parent).
+* Receives emails from you and posts them on the website (parent->teacher).
+* Notifies you of upcoming events, news and substitutions (school->parent).
 
 This has several advantages:
 
-* Saves time
-* Supports multiple parents
-* Integrates with email based workflows
-* Enables text search in your email client
+* **Saves time**\
+You no longer have to log into the portal to check for new information.
+* **Supports multiple parents**\
+Emails can be sent to multiple receivers via regular email forwarding. The portal, on the other hand, works only for a single parent, e.g. it will not highlight new messages for a second parent.
+* **Supports the student**\
+Substitution plan and upcoming events can be sent to the student.
+* **Integrates with email based workflows**\
+All information is in your email client. Fully email-based two-way communication with teachers.
+* **Enables search in your email client**
 
 ## Project Status
 
@@ -20,11 +26,12 @@ This project is in alpha state.
 
 Eltern-Emailer logs into the Eltern-Portal website and checks for new messages and updated content in certain [categories](#supported-sections-at-head), e.g.
 
-* news in `Aktuelles`
+* news in `Aktuelles` and `Schwarzes Brett`
 * messages from teachers in `Kommunikation Eltern/Fachlehrer/Klassenleitung`
 * the substitution plan in `Vertretungsplan`
+* upcoming events (including exams) in `Schulaufgaben/Weitere Termine`
 
-It then sends these messages and news to you via email.
+It then sends these messages and updates to you via email.
 
 Optionally, it also checks a dedicated IMAP inbox for emails from you and forwards them to the intended teacher. This allows you to communicate with any teacher entirely via email.
 
@@ -46,19 +53,14 @@ The following sections in the web UI are supported:
 * `Kommunikation Eltern/Klassenleitung`
 * `Klassen Vertretungsplan`
 * `Schwarzes Brett`
+* `Schulaufgaben / Weitere Termine`
 
 ### Planned Features
 
-The following sections are on my radar (roughly in order of priority):
-
-* `Schulaufgaben / Weitere Termine`
-
-Schools use different feature subsets of the portal. If a feature is missing for your school, let me know or, even better, contribute code.
-
-Other planned features:
-
 * Send messages to "Klassenleitung".
 * Run on a Raspberry Pi.
+
+Schools use different feature subsets of the portal. If a feature is missing for your school, let me know or, even better, contribute code.
 
 ## Installation
 
@@ -93,7 +95,7 @@ These parameters are used to log into the Eltern-Portal.
 
 ### `smtp`
 
-These parameters configure the SMTP transport in the Nodemailer module. The full set of options described in the [Nodemailer documentation](https://nodemailer.com/smtp/) is available. The default values for `port` (465) and `secure` (true) work well for many servers (e.g. Outlook), but yours may require different settings.
+These parameters configure the SMTP transport in the Nodemailer module. The full set of options described in the [Nodemailer documentation](https://nodemailer.com/smtp/) is available. The default values for `port` (465) and `secure` (true) work well for many servers (e.g. Outlook web mail), but yours may require different settings.
 
 ### `imap`
 
@@ -106,10 +108,11 @@ IMAP support is optional and must be turned on via `incomingEmailEnabled` in the
 These control the behavior of Eltern-Emailer.
 
 * `emailTo` The recipient of all emails sent by the application. Specify only the address, not the real name. This will typically be a parent's email address, or an address that forwards to both parents.
-* `emailToKid` The kid's email address (optional; may be empty). If set, information intended for the kid (currently only substitution plan updates, but possibly more in future versions) will be sent to this address.
+* `emailToStudent` The student's email address (optional; may be empty). If set, information intended for the student (currently substitution plan updates and upcoming events) will additionally be sent to this address.
 * `emailFrom` The sender used for all emails sent by the application. Specify only the address, not the name. This is where bounced emails are delivered to, e.g. when the recipient's mailbox is full. It can be the same as `emailTo`, or the address of the person maintaining the Eltern-Emailer installation. Note that bounced emails contain the full content, i.e. sensitive personal information.
-* `incomingEmailEnabled`: Check the IMAP inbox specified under [`imap`](#imap). See [Sending Messages to Teachers](#sending-messages-to-teachers) and [Reducing Latency](#reducing-latency).
-* `incomingEmailAddressForForwarding`: The email address of the IMAP inbox. This allows replying to threads with teachers by email.
+* `incomingEmailEnabled` Check the IMAP inbox specified under [`imap`](#imap). See [Sending Messages to Teachers](#sending-messages-to-teachers) and [Reducing Latency](#reducing-latency).
+* `incomingEmailAddressForForwarding` The email address of the IMAP inbox. This allows replying to threads with teachers by email.
+* `eventLookaheadDays` For notification of upcoming events. This controls how long in advance you (and possibly the student, see `emailToStudent`) are notified. Each event triggers only one notification, so e.g. 14 means you are notified two weeks in advance and have to keep it in mind from then on.
 * `checkIntervalMinutes` How frequently the Eltern-Portal website is checked for new content. This determines the maximum latency emails sent by Eltern-Emailer have relative to the content becoming visible online. Please keep this value at the default of 30 minutes (or higher) to limit traffic to the site.
 * `smtpWaitSeconds` Time to wait between sending emails. SMTP servers typically reject messages when they are enqueued too quickly.
 * `once` Run only once and terminate. By default the application keeps running, rechecking every `checkIntervalMinutes`.
@@ -119,7 +122,7 @@ These control the behavior of Eltern-Emailer.
 
 ### Sending Messages to Teachers
 
-Eltern-Emailer can receive emails from you and forward them to teachers via the website. This requires a dedicated email account accessible via IMAP (see [`imap`](#imap) above). The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. Outlook is known to work. GMail does not work because it does not support password login.
+Eltern-Emailer can receive emails from you and forward them to teachers via the website. This requires a dedicated email account accessible via IMAP (see [`imap`](#imap) above). The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. Outlook web mail is known to work. GMail does not work because it does not support password login.
 
 The message size limit enforced by the website does not apply here. If your email is longer than 512 characters (I'm not sure if all schools use the same limit; currently this value is hardcoded), it is automatically split up.
 
