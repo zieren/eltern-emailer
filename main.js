@@ -391,17 +391,14 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
 async function readInquiries(page) {
   await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation');
   const inquiries = await page.$$eval(
-    'h3.panel-title', (headings) => headings.map((h) => {
+    'div.panel', (panels) => panels.map(p => {
       return {
-        subject: h.textContent.trim().replace(/\(Beantwortet\) (?=\d\d\.\d\d\.\d\d\d\d)/, '')
+        subject: p.querySelector('h3.panel-title')
+            .textContent.trim().replace(/\(Beantwortet\) (?=\d\d\.\d\d\.\d\d\d\d)/, ''),
+        messages: Array.from(p.querySelector('div.panel-body').childNodes)
+            .filter(n => n.nodeName === '#text').map(n => n.textContent)
       };
     }));
-  for (let i = 0; i < inquiries.length; ++i) {
-    inquiries[i].messages = await page.$eval('div#bear_' + i,
-        (div) => Array.from(div.firstElementChild.childNodes)
-            .filter(c => c.nodeName === '#text')
-            .map(c => c.textContent));
-  }
   LOG.info('Found %d inquiries', inquiries.length);
   // Order is reverse chronological, make it forward.
   return inquiries.reverse();
