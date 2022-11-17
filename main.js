@@ -934,9 +934,8 @@ async function main() {
 (async () => {
   while (true) {
     await main().catch(e => {
-      LOG.error('Main loop exited with the following error:');
-      LOG.error(e);
-      LOG.error(e.stack);
+      // Winston's file transport silently swallows calls in quick succession, so concatenate.
+      LOG.error('Main loop exited with the following error:\n' + e.stack);
       if (imapClient) {
         imapClient.close(); // logout() doesn't work when an operation is in progress
       }
