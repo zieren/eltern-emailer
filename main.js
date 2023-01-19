@@ -1,5 +1,5 @@
-const TITLE = 'Eltern-Emailer 0.3.0 (c) 2022 Jörg Zieren, GNU GPL v3.'
-    + ' See https://github.com/zieren/eltern-emailer for component license info';
+const TITLE = 'Eltern-Emailer 0.3.1 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
+    + ' See https://zieren.de/software/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
 const { exit } = require('process');
