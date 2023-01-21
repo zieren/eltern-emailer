@@ -1,4 +1,4 @@
-const TITLE = 'Eltern-Emailer 0.3.1 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.4.0 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
     + ' See https://zieren.de/software/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
@@ -171,6 +171,27 @@ function sleepSeconds(seconds) {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
 
+/** Downloads from file.url, setting file.filename and file.content. */
+async function downloadFile(file, options) {
+  // Collect buffers and use Buffer.concat() to avoid chunk size arithmetics.
+  let buffers = [];
+  // It seems attachment downloads don't need to be throttled.
+  await new Promise((resolve, reject) => {
+    https.get(file.url, options, (response) => {
+      file.filename =
+          contentDisposition.parse(response.headers['content-disposition']).parameters.filename;
+      response.on('data', (buffer) => {
+        buffers.push(buffer);
+      }).on('end', () => {
+        file.content = Buffer.concat(buffers);
+        resolve();
+      });
+    }).on('error', (error) => {
+      reject(error);
+    });
+  });
+}
+
 // ---------- Login ----------
 
 /** This function does the thing. The login thing. You know? */
@@ -227,30 +248,12 @@ async function readAnnouncements(page) {
  * Reads attachments for all announcements not included in processedAnnouncements. Attachments are
  * stored in memory.
  */
-async function readAttachments(page, announcements, processedAnnouncements) {
-  const options = {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
-  for (const a of announcements) {
-    if (a.id in processedAnnouncements || !a.url) {
-      continue;
-    }
-    // Collect buffers and use Buffer.concat() to avoid messing with chunk size arithmetics.
-    let buffers = [];
-    // It seems attachment downloads don't need to be throttled.
-    await new Promise((resolve, reject) => {
-      https.get(a.url, options, (response) => {
-        a.filename =
-            contentDisposition.parse(response.headers['content-disposition']).parameters.filename;
-        response.on('data', (buffer) => {
-          buffers.push(buffer);
-        }).on('end', () => {
-          a.content = Buffer.concat(buffers);
-          LOG.info('Read attachment (%d kb) for: %s', a.content.length >> 10, a.subject);
-          resolve();
-        });
-      }).on('error', (error) => {
-        reject(error);
-      });
-    });
+async function readAnnouncementsAttachments(page, announcements, processedAnnouncements) {
+  let options = null;
+  for (const a of announcements.filter(a => a.url && !(a.id in processedAnnouncements))) {
+    options ||= {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
+    await downloadFile(a, options);
+    LOG.info('Read attachment (%d kb) for: %s', a.content.length >> 10, a.subject);
   }
 }
 
@@ -340,13 +343,34 @@ async function readThreadsContents(page, teachers) {
       await page.goto(thread.url + '?load_all=1'); // Prevent pagination (I hope).
       thread.messages = await page.$eval('div#last_messages',
           (div) => Array.from(div.children).map(row => {
+            const a = row.querySelector('a.link_nachrichten');
             return {
-              author: row.firstChild.firstChild.textContent,
-              body: row.children[1].firstChild.textContent
+              author: row.querySelector('label.control-label span').textContent,
+              body: row.querySelector('div div.form-control').textContent,
+              url: a ? a.href : null
             };
           }));
       LOG.debug(
           'Read %d messages with %s in "%s"', thread.messages.length, teacher.name, thread.subject);
+    }
+  }
+}
+
+async function readThreadsAttachments(page, teachers, processedThreads) {
+  let options = null;
+  for (const teacher of teachers) {
+    for (const thread of teacher.threads) {
+      for (let i = 0; i < thread.messages.length; ++i) {
+        if (!(thread.id in processedThreads) || !(i in processedThreads[thread.id])) {
+          if (thread.messages[i].url) {
+            const msg = thread.messages[i];
+            options ||= {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
+            await downloadFile(msg, options);
+            LOG.info('Read attachment (%d kb) from "%s" in "%s"',
+                msg.content.length >> 10, msg.author, thread.subject);
+          }
+        }
+      }
     }
   }
 }
@@ -360,13 +384,22 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
       // Messages are in forward chronological order, which is the order in which we want to send.
       for (let i = 0; i < thread.messages.length; ++i) {
         if (!(i in processedThreads[thread.id])) {
+          const msg = thread.messages[i];
           // The thread ID seems to be globally unique. Including the teacher ID simplifies posting
           // replies, because the mail client will put this ID in the In-Reply-To header.
           const messageIdBase = 'thread-' + teacher.id + '-' + thread.id + '-';
-          const email = buildEmail(thread.messages[i].author, thread.subject, {
+          const email = buildEmail(msg.author, thread.subject, {
             messageId: buildMessageId(messageIdBase + i),
-            text: thread.messages[i].body
+            text: msg.body
           });
+          if (msg.content) {
+            email.attachments = [
+              {
+                filename: msg.filename,
+                content: msg.content
+              }
+            ];
+          }
           if (i > 0) {
             email.references = [buildMessageId(messageIdBase + (i - 1))];
           }
@@ -877,7 +910,7 @@ async function main() {
 
     // Section "Aktuelles".
     const announcements = await readAnnouncements(page); // Always reads all.
-    await readAttachments(page, announcements, state.announcements);
+    await readAnnouncementsAttachments(page, announcements, state.announcements);
     buildEmailsForAnnouncements(page, announcements, state.announcements, emails);
 
     // Section "Kommunikation Eltern/Klassenleitung".
@@ -888,6 +921,7 @@ async function main() {
     const teachers = await readActiveTeachers(page);
     await readThreadsMeta(page, teachers);
     await readThreadsContents(page, teachers);
+    await readThreadsAttachments(page, teachers, state.threads);
     buildEmailsForThreads(teachers, state.threads, emails);
 
     // Section "Vertretungsplan"
