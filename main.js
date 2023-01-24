@@ -87,7 +87,10 @@ let lastFailureEpochMillis = 0;
 /** Initialized in main() after parsing CLI flags. */
 let CONFIG = {}, LOG = null;
 
-let imapClient = null;
+/** The IMAP client. */
+let imapFlow = null;
+/** This is set from the ImapFlow 'error' event handler. It triggers a retry. */
+let imapReconnect = false;
 /** Synchronization between IMAP event listener and main loop. */
 let awake = () => {}; // Event handler may fire before the main loop builds the wait Promise.
 /** 
@@ -103,9 +106,9 @@ let outbox = [];
 /** Wrap logger for IMAP, stripping all fields except msg. */
 const imapLogger = {
   debug: (o) => {}, // This is too noisy.
-  info: (o) => LOG.info('IMAP: ' + o.msg),
-  warn: (o) => LOG.warn('IMAP: ' + o.msg),
-  error: (o) => LOG.error('IMAP: ' + o.msg)
+  info: (o) => LOG.info('IMAP: ' + JSON.stringify(o)),
+  warn: (o) => LOG.warn('IMAP: ' + JSON.stringify(o)),
+  error: (o) => LOG.error('IMAP: ' + JSON.stringify(o))
 };
 
 // ---------- Initialization functions ----------
@@ -687,6 +690,37 @@ async function sendEmails(emails) {
 
 // ---------- Incoming email ----------
 
+/** Create the ImapFlow client, configure its event handlers and open the mailbox. */
+async function createImapFlow() {
+  imapFlow = new ImapFlow(CONFIG.imap);
+  // Check for new messages on open, and whenever the # of existing messages changes.
+  imapFlow
+      .on('mailboxOpen', async () => {
+        // This will run before the 'exists' handler below.
+        LOG.debug('Mailbox opened, checking for new messages...');
+        await processNewEmail();
+      })
+      .on('exists', async (data) => {
+        LOG.info('Received new message(s): ' + JSON.stringify(data));
+        await processNewEmail();
+      })
+      // Without an error handler, errors crash the entire NodeJS env!
+      // Background: https://nodejs.dev/en/api/v19/events/
+      .on('error', (e) => {
+        LOG.error('ImapFlow error: ' + JSON.stringify(e));
+        // If we lost the connection to the IMAP server, which can happen e.g. after a Windows
+        // suspend->resume cycle, or simply in case of random network issues, we request a reconnect
+        // and terminate the waiting in the main loop. The main loop will then throw an exception,
+        // triggering the regular retry with exponential backoff.
+        imapReconnect = e.code == 'ECONNRESET';
+        awake();
+      });
+  await imapFlow.connect();
+  await imapFlow.mailboxOpen('INBOX');
+  LOG.info('Listening on IMAP mailbox')
+  return imapFlow;
+}
+
 /** This uses the "answered" flag, which is part of the IMAP standard, to mark messages done. */
 async function processNewEmail() {
   // Collect messages not intended for forwarding to teachers. These are marked processed to hide
@@ -694,7 +728,7 @@ async function processNewEmail() {
   const ignoredMessages = {};
   let numNewMessages = 0;
   
-  for await (let message of imapClient.fetch({answered: false}, { source: true })) {
+  for await (let message of imapFlow.fetch({answered: false}, { source: true })) {
     ++numNewMessages;
     // This is removed if we found something to process, i.e. registered a success handler that
     // will mark the message processed.
@@ -762,7 +796,7 @@ async function processNewEmail() {
 
   if (Object.keys(ignoredMessages).length) {
     const seqs = Object.keys(ignoredMessages).join();
-    await imapClient.messageFlagsAdd({seq: seqs}, ['\\Answered']);
+    await imapFlow.messageFlagsAdd({seq: seqs}, ['\\Answered']);
     LOG.debug('Marked ignored emails: ' + seqs);
   }
 
@@ -775,10 +809,10 @@ async function processNewEmail() {
 
 async function markEmail(seq, done) {
   if (done) {
-    await imapClient.messageFlagsAdd({ seq: seq }, ['\\Answered']);
+    await imapFlow.messageFlagsAdd({ seq: seq }, ['\\Answered']);
     LOG.debug('Marked processed email: ' + seq);
   } else {
-    await imapClient.messageFlagsRemove({ seq: seq }, ['\\Answered']);
+    await imapFlow.messageFlagsRemove({ seq: seq }, ['\\Answered']);
     LOG.debug('Marked unprocessed email: ' + seq);
   }
 }
@@ -857,6 +891,10 @@ async function sendMessagesToTeachers(page) {
 
 // ---------- Main ----------
 
+/** 
+ * If this function returns normally, its return value will be the program's exit code. If it 
+ * throws, we perform a retry (i.e. call it again) with exponential backoff.
+ */
 async function main() {
   const parser = await import('args-and-flags').then(aaf => {
     return new aaf.default(CLI_OPTIONS);
@@ -864,6 +902,7 @@ async function main() {
   const {_, flags} = parser.parse(process.argv.slice(2));
 
   CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
+  CONFIG.imap.logger = imapLogger; // standing orders
   LOG = createLogger();
   LOG.info(TITLE);
 
@@ -879,16 +918,7 @@ async function main() {
 
   // Start IMAP listener, if enabled.
   if (CONFIG.options.incomingEmailEnabled) {
-    CONFIG.imap.logger = imapLogger;
-    imapClient = new ImapFlow(CONFIG.imap);
-    imapClient.on('exists', async (data) => {
-      LOG.debug('Received new message(s): ' + JSON.stringify(data));
-      await processNewEmail();
-    });
-    await imapClient.connect();
-    await imapClient.mailboxOpen('INBOX');
-    LOG.info('Listening on IMAP mailbox')
-    await processNewEmail();
+    imapFlow = await createImapFlow();
   }
 
   while (true) {
@@ -905,7 +935,8 @@ async function main() {
     await login(page);
     const emails = [];
 
-    // Send messages to teachers. We later retrieve those messages when crawling threads below.
+    // Send messages to teachers. We later retrieve those messages when crawling threads below. That
+    // is intentional because presumably the second parent wants a copy of the message.
     await sendMessagesToTeachers(page);
 
     // Section "Aktuelles".
@@ -947,39 +978,46 @@ async function main() {
 
     if (CONFIG.options.once) {
       LOG.info('Terminating due to --once flag/option');
-      if (imapClient) {
-        await imapClient.logout();
+      if (imapFlow) {
+        await imapFlow.logout();
       }
       return 0;
     }
 
-    // Wait until timeout or email received.
-    LOG.debug('Waiting %d minutes until next check', CONFIG.options.checkIntervalMinutes);
+    // Wait until timeout, email received or IMAP reconnect request.
     const p = new Promise((resolve) => {
       awake = resolve;
-      // Only now will the IMAP receive event handler awake us. It could already have populated the
+      // Only now can the IMAP receive event handler awake us. It could already have populated the
       // outbox and notified the previous Promise while the main loop was busy, so check for that.
-      if (outbox.length) {
+      // It could also have requested a reconnect.
+      if (outbox.length || imapReconnect) {
         resolve();
       } else {
+        LOG.debug('Waiting %d minutes until next check', CONFIG.options.checkIntervalMinutes);
         setTimeout(resolve, CONFIG.options.checkIntervalMinutes * 60 * 1000);
       }
     });
     await p;
+    if (imapReconnect) {
+      imapReconnect = false;
+      throw 'Triggering IMAP reconnect'; // Trigger retry with exponential backoff.
+    }
   }
 };
 
 (async () => {
   while (true) {
-    await main().catch(e => {
+    const err = await main().catch(e => {
       // Winston's file transport silently swallows calls in quick succession, so concatenate.
-      LOG.error('Main loop exited with the following error:\n' + e.stack);
-      if (imapClient) {
-        imapClient.close(); // logout() doesn't work when an operation is in progress
+      LOG.error('Error in main loop:\n' + (e.stack || e));
+      if (imapFlow) {
+        imapFlow.close(); // logout() doesn't work when an operation is in progress
       }
-    }).then((err) => {
-      exit(err);
     });
+    if (typeof err !== 'undefined') {
+      LOG.info('Exiting with code ' + err);
+      exit(err);
+    }
 
     const nowEpochMillis = Date.now();
     const secondsSinceLastFailure = (nowEpochMillis - lastFailureEpochMillis) / 1000;
