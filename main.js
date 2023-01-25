@@ -712,7 +712,9 @@ async function createImapFlow() {
         // suspend->resume cycle, or simply in case of random network issues, we request a reconnect
         // and terminate the waiting in the main loop. The main loop will then throw an exception,
         // triggering the regular retry with exponential backoff.
-        imapReconnect = e.code == 'ECONNRESET';
+        // Further errors may follow, but we never clear the flag because once ECONNRESET happened,
+        // a reconnect will probably help regardless of subsequent problems.
+        imapReconnect ||= e.code == 'ECONNRESET';
         awake();
       });
   await imapFlow.connect();
