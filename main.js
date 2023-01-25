@@ -538,7 +538,7 @@ async function readEventsInternal(page, now) {
       // single line for better readability.
       const compactDateTime = (s) => s.replace(/( |20\d\d)/g, '').replace(/-/g, '&#8209;');
       const descriptionHTML = 
-          '<td>*</td><td>' + compactDateTime(td.innerText)
+          '<td>' + compactDateTime(td.innerText)
           + '</td><td>&nbsp;' + compactDateTime(td.nextSibling.innerText)
           + '</td><td>' + td.nextSibling.nextSibling.innerText + '</td>';
       return {
@@ -587,14 +587,13 @@ async function readEvents(page, previousHashes, emails) {
       + '<style>'
       + 'table { border-collapse: collapse; } '
       + 'tr { border-bottom: 1pt solid; } '
-      + 'td:first-child { visibility: hidden; } '
       + 'tr.new { font-weight: bold; } '
-      + 'tr.new td:first-child { visibility: visible; } '
       + '</style>'
       + '</head><body><h2>Termine in den n&auml;chsten ' + CONFIG.options.eventLookaheadDays
       + ' Tagen</h2><table>';
   upcomingEvents.forEach(e => emailHTML +=  
-      '<tr class="' + (e.hash in previousHashes ? '' : 'new') + '">' + e.descriptionHTML + '</tr>');
+      (e.hash in previousHashes ? '<tr><td>' : '<tr class="new"><td>*') + '</td>' 
+      + e.descriptionHTML + '</tr>');
   emailHTML += '</table></body></html>';
   const doStudent = !!CONFIG.options.emailToStudent;
   let emailsLeft = doStudent ? 2 : 1;
