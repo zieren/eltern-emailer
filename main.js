@@ -50,6 +50,8 @@ const CLI_OPTIONS = {
 };
 
 const EMPTY_STATE = {
+  // Last successful run (epoch millis). Older data in the portal can be skipped for performance.
+  lastSuccessfulRun: 0,
   threads: {}, 
   announcements: {},
   inquiries: {}, 
@@ -84,9 +86,10 @@ let lastFailureEpochMillis = 0;
 
 // ---------- Shared state ----------
 
+/** The ~current time (epoch millis). Set at the start of each main loop iteration. */
+let NOW = null;
 /** Initialized in main() after parsing CLI flags. */
 let CONFIG = {}, LOG = null;
-
 /** The IMAP client. */
 let imapFlow = null;
 /** This is set from the ImapFlow 'error' event handler. It triggers a retry. */
@@ -318,19 +321,26 @@ async function readActiveTeachers(page) {
  * Reads metadata for all threads, based on active teachers returned by readActiveTeachers().
  * Threads are stored with key 'threads' for each teacher.
  */
-async function readThreadsMeta(page, teachers) {
+async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
   for (const teacher of teachers) {
     LOG.debug('Reading threads with %s', teacher.name);
     await page.goto(teacher.url);
-    teacher.threads = await page.$$eval(
+    teacher.threads = (await page.$$eval(
         'a[href*="meldungen/kommunikation_fachlehrer/"]',
         (anchors) => anchors.map((a) => {
+          // We don't use the time of day because it's in 12h format and missing any am/pm
+          // indication (sic). That is ridiculous, but it's still easily good enough for caching.
+          const d = a.parentElement.previousSibling.textContent.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
           return {
             id: a.href.match(/.*\/([0-9]+)$/)[1],
             url: a.href,
-            subject: a.textContent
+            subject: a.textContent,
+            // We add two days to the date to account for a) lacking time of day, and b) timezones.
+            // There is no need to cut it close, the performance gain would not outweigh complexity.
+            latest: new Date(d[3], d[2] - 1, parseInt(d[1]) + 2).getTime()
           };
-        }));
+        })))
+        .filter(t => t.latest >= lastSuccessfulRun);
   }
 }
 
@@ -527,10 +537,11 @@ async function readNoticeBoard(page, previousHashes, emails) {
 
 // ---------- Events ----------
 
-async function readEventsInternal(page, now) {
+async function readEventsInternal(page) {
   let events = await page.$$eval('table.table2 td:nth-last-child(3)', (tds) => tds.map(td => {
       // Sometimes date ranges are specified. They may be invalid ("24.12.-23.12.""). We only care
       // about the start (first) date and ignore the end date.
+      // TODO: Should this use textContent instead?
       const d = td.innerText.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
       // The date should always parse. The error (null) case is handled below.
       const ts = d ? new Date(d[3], d[2] - 1, d[1]).getTime() : null;
@@ -548,7 +559,7 @@ async function readEventsInternal(page, now) {
       }));
   // Handle parsing failures here because we don't have the logger in the page context above.
   events.filter(e => !e.ts).forEach(e => {
-    e.ts = now; // Assume the event is imminent, just to be safe.
+    e.ts = NOW; // Assume the event is imminent, just to be safe.
     // We only have the HTML here, but this case should be very rare.
     LOG.error('Failed to parse date: ' + e.descriptionHTML);
   });
@@ -556,26 +567,25 @@ async function readEventsInternal(page, now) {
 }
 
 async function readEvents(page, previousHashes, emails) {
-  const now = Date.now();
-
   // Remove expired hashes.
   Object.entries(previousHashes)
-      .filter(([_, ts]) => ts < now)
+      // TODO: This will discard whole day events before the day is out. We should use a margin for that.
+      .filter(([_, ts]) => ts < NOW)
       .forEach(([hash, _]) => delete previousHashes[hash])
 
   // Read all exams and events.
   await page.goto(CONFIG.elternportal.url + '/service/termine/liste/schulaufgaben');
-  let events = await readEventsInternal(page, now);
+  let events = await readEventsInternal(page);
   await page.goto(CONFIG.elternportal.url + '/service/termine/liste/allgemein');
-  events = events.concat(await readEventsInternal(page, now));
+  events = events.concat(await readEventsInternal(page));
 
   // Filter those within the lookahead range and not yet processed.
-  let lookaheadDate = new Date(now);
+  let lookaheadDate = new Date(NOW);
   // Javascript handles the date wraparound.
   lookaheadDate.setDate(lookaheadDate.getDate() + CONFIG.options.eventLookaheadDays);
   const lookahead = lookaheadDate.getTime();
   const upcomingEvents = 
-      events.filter(e => e.ts >= now && e.ts <= lookahead).sort((a, b) => a.ts - b.ts);
+      events.filter(e => e.ts >= NOW && e.ts <= lookahead).sort((a, b) => a.ts - b.ts);
   const numNewEvents = upcomingEvents.filter(e => !(e.hash in previousHashes)).length;
 
   // Create emails.
@@ -923,6 +933,8 @@ async function main() {
   }
 
   while (true) {
+    NOW = Date.now();
+
     // Read state within the loop to allow editing the state file manually without restarting.
     const state = readState();
     LOG.debug('Read state: %d announcements, %d threads, %d inquiries, hashes=%s',
@@ -951,7 +963,7 @@ async function main() {
 
     // Section "Kommunikation Eltern/Fachlehrer".
     const teachers = await readActiveTeachers(page);
-    await readThreadsMeta(page, teachers);
+    await readThreadsMeta(page, teachers, state.lastSuccessfulRun);
     await readThreadsContents(page, teachers);
     await readThreadsAttachments(page, teachers, state.threads);
     buildEmailsForThreads(teachers, state.threads, emails);
@@ -965,12 +977,13 @@ async function main() {
     // Section "Schulaufgaben / Weitere Termine"
     await readEvents(page, state.hashes.events, emails);
 
-    // Send emails to user.
+    // Send emails to user and possibly update state.
     if (CONFIG.options.test) {
       await sendEmails(createTestEmails(emails.length));
       // Don't update state.
     } else {
       await sendEmails(emails);
+      state.lastSuccessfulRun = NOW;
       fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
     }
 
