@@ -323,7 +323,7 @@ async function readThreadsMeta(page, teachers) {
     LOG.debug('Reading threads with %s', teacher.name);
     await page.goto(teacher.url);
     teacher.threads = await page.$$eval(
-        'a[href*="meldungen/kommunikation_fachlehrer/"',
+        'a[href*="meldungen/kommunikation_fachlehrer/"]',
         (anchors) => anchors.map((a) => {
           return {
             id: a.href.match(/.*\/([0-9]+)$/)[1],
