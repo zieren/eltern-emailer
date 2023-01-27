@@ -541,7 +541,6 @@ async function readEventsInternal(page) {
   let events = await page.$$eval('table.table2 td:nth-last-child(3)', (tds) => tds.map(td => {
       // Sometimes date ranges are specified. They may be invalid ("24.12.-23.12.""). We only care
       // about the start (first) date and ignore the end date.
-      // TODO: Should this use textContent instead?
       const d = td.textContent.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
       // The date should always parse. The error (null) case is handled below.
       const ts = d ? new Date(d[3], d[2] - 1, d[1]).getTime() : null;
