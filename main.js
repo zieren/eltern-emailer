@@ -541,6 +541,8 @@ async function readEventsInternal(page) {
   let events = await page.$$eval('table.table2 td:nth-last-child(3)', (tds) => tds.map(td => {
       // Sometimes date ranges are specified. They may be invalid ("24.12.-23.12.""). We only care
       // about the start (first) date and ignore the end date.
+      // Also, some events include a time of day while others don't. We always assume 0:00:00 and
+      // include the event until the next day, so it doesn't vanish on the day itself.
       const d = td.textContent.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
       // The date should always parse. The error (null) case is handled below.
       const ts = d ? new Date(d[3], d[2] - 1, d[1]).getTime() : null;
@@ -566,10 +568,13 @@ async function readEventsInternal(page) {
 }
 
 async function readEvents(page, previousHashes, emails) {
-  // Remove expired hashes.
+  // An event is considered expired on the next day. We store events with a time of day of 0:00:00,
+  // so we compute the timestamp for 0:00:00 today and prune events before then.
+  const todayZeroDate = new Date(NOW);
+  todayZeroDate.setHours(0, 0, 0, 0);
+  const todayZeroTs = todayZeroDate.getTime();
   Object.entries(previousHashes)
-      // TODO: This will discard whole day events before the day is out. We should use a margin for that.
-      .filter(([_, ts]) => ts < NOW)
+      .filter(([_, ts]) => ts < todayZeroTs)
       .forEach(([hash, _]) => delete previousHashes[hash])
 
   // Read all exams and events.
@@ -579,12 +584,11 @@ async function readEvents(page, previousHashes, emails) {
   events = events.concat(await readEventsInternal(page));
 
   // Filter those within the lookahead range and not yet processed.
-  let lookaheadDate = new Date(NOW);
-  // Javascript handles the date wraparound.
+  let lookaheadDate = new Date(todayZeroDate);
   lookaheadDate.setDate(lookaheadDate.getDate() + CONFIG.options.eventLookaheadDays);
-  const lookahead = lookaheadDate.getTime();
+  const lookaheadTs = lookaheadDate.getTime();
   const upcomingEvents = 
-      events.filter(e => e.ts >= NOW && e.ts <= lookahead).sort((a, b) => a.ts - b.ts);
+      events.filter(e => e.ts >= todayZeroTs && e.ts <= lookaheadTs).sort((a, b) => a.ts - b.ts);
   const numNewEvents = upcomingEvents.filter(e => !(e.hash in previousHashes)).length;
 
   // Create emails.
