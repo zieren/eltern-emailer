@@ -542,16 +542,16 @@ async function readEventsInternal(page) {
       // Sometimes date ranges are specified. They may be invalid ("24.12.-23.12.""). We only care
       // about the start (first) date and ignore the end date.
       // TODO: Should this use textContent instead?
-      const d = td.innerText.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
+      const d = td.textContent.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
       // The date should always parse. The error (null) case is handled below.
       const ts = d ? new Date(d[3], d[2] - 1, d[1]).getTime() : null;
       // Remove year because it's obvious, and use non-breaking hyphen to keep date and time on a
       // single line for better readability.
       const compactDateTime = (s) => s.replace(/( |20\d\d)/g, '').replace(/-/g, '&#8209;');
       const descriptionHTML = 
-          '<td>' + compactDateTime(td.innerText)
-          + '</td><td>&nbsp;' + compactDateTime(td.nextSibling.innerText)
-          + '</td><td>' + td.nextSibling.nextSibling.innerText + '</td>';
+          '<td>' + compactDateTime(td.textContent)
+          + '</td><td>&nbsp;' + compactDateTime(td.nextSibling.textContent)
+          + '</td><td>' + td.nextSibling.nextSibling.textContent + '</td>';
       return {
         ts: ts, 
         descriptionHTML: descriptionHTML,
