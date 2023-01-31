@@ -60,6 +60,7 @@ const EMPTY_STATE = {
     notices: {},
     events: {} // key: hash; value: timestamp
   }};
+
 const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
 
 /**
@@ -70,6 +71,12 @@ const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
  * - 'hashes': Other content, e.g. "Vertretungsplan"
  */
 const STATE_FILE = 'state.json';
+
+/** 
+ * These errors, (at least some of) which may be emitted by the ImapFlow object, trigger a 
+ * reconnect. This list is copied from imap-flow.js, which calls these errors "noise" :-).
+ */
+const IMAP_TRANSIENT_ERRORS = ['Z_BUF_ERROR', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'EHOSTUNREACH'];
 
 // ---------- Retry throttling ----------
 
@@ -719,14 +726,15 @@ async function createImapFlow() {
       // Without an error handler, errors crash the entire NodeJS env!
       // Background: https://nodejs.dev/en/api/v19/events/
       .on('error', (e) => {
-        LOG.error('ImapFlow error: ' + JSON.stringify(e));
+        // Error details were already logged by our custom logger.
         // If we lost the connection to the IMAP server, which can happen e.g. after a Windows
-        // suspend->resume cycle, or simply in case of random network issues, we request a reconnect
-        // and terminate the waiting in the main loop. The main loop will then throw an exception,
-        // triggering the regular retry with exponential backoff.
-        // Further errors may follow, but we never clear the flag because once ECONNRESET happened,
-        // a reconnect will probably help regardless of subsequent problems.
-        imapReconnect ||= e.code == 'ECONNRESET';
+        // suspend->resume cycle, or simply in case of random network issues, the ImapFlow object
+        // emits an ECONNRESET event. Presumably other transient errors may happen as well. We
+        // request a reconnect and terminate the waiting in the main loop. The main loop will then
+        // throw an exception, triggering the regular retry with exponential backoff.
+        // Further errors may follow, but we never clear the flag because once a transient error has
+        // been observed, a reconnect will probably help regardless of subsequent problems.
+        imapReconnect ||= IMAP_TRANSIENT_ERRORS.includes(e.code);
         awake();
       });
   await imapFlow.connect();
@@ -932,7 +940,25 @@ async function main() {
 
   // Start IMAP listener, if enabled.
   if (CONFIG.options.incomingEmailEnabled) {
-    imapFlow = await createImapFlow();
+    try {
+      imapFlow = await createImapFlow();
+    } catch (e) {
+      // Error details were already logged by our custom logger.
+      // Check for some permanent errors upon which we should quit. This list may need to be
+      // extended.
+      if (e.authenticationFailed) {
+        LOG.error('IMAP server rejected credentials');
+        return 3;
+      }
+      if (e.code == 'ENOTFOUND') {
+        LOG.error('IMAP server not found');
+        return 4;
+      }
+      // Occasionally we get "some other error" (hooray for implicit typing...). We assume here
+      // that all errors not handled above are transient, which may be wrong but shouldn't cause
+      // too much trouble due to our exponential backoff.
+      throw e; // retry
+    }
   }
 
   while (true) {
