@@ -974,11 +974,10 @@ async function main() {
 
     // Read state within the loop to allow editing the state file manually without restarting.
     const state = readState();
-    LOG.debug('Read state: %d announcements, %d threads, %d inquiries, hashes=%s',
+    LOG.debug('Read state: %d announcements, %d threads, %d inquiries',
         Object.keys(state.announcements).length,
         Object.keys(state.threads).length,
-        Object.keys(state.inquiries).length,
-        JSON.stringify(state.hashes));
+        Object.keys(state.inquiries).length);
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
 
