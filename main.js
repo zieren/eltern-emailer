@@ -116,9 +116,16 @@ let outbox = [];
 /** Wrap logger for IMAP, stripping all fields except msg. */
 const imapLogger = {
   debug: (o) => {}, // This is too noisy.
-  info: (o) => LOG.info('IMAP: ' + JSON.stringify(o)),
-  warn: (o) => LOG.warn('IMAP: ' + JSON.stringify(o)),
-  error: (o) => LOG.error('IMAP: ' + JSON.stringify(o))
+  info: (o) => LOG.info('IMAP: %s', JSON.stringify(o)),
+  warn: (o) => {
+    LOG.warn('IMAP: %s', JSON.stringify(o));
+    // The IMAP client can get stuck with nothing but a warning level log. So we do essentially the
+    // same here as in the ImapFlow error handler, i.e. request a reconnect.
+    imapReconnect = true;
+    awake();
+  },
+  error: (o) => LOG.error('IMAP: %s', JSON.stringify(o)) 
+  // The ImapFlow error handler initiates reconnect, so no need to do it here.
 };
 
 // ---------- Initialization functions ----------
