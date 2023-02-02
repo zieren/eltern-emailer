@@ -371,7 +371,8 @@ async function readThreadsContents(page, teachers) {
             };
           }));
       LOG.debug(
-          'Read %d messages with %s in "%s"', thread.messages.length, teacher.name, thread.subject);
+          'Read %d recent messages with %s in "%s"',
+          thread.messages.length, teacher.name, thread.subject);
     }
   }
 }
@@ -569,7 +570,7 @@ async function readEventsInternal(page) {
   events.filter(e => !e.ts).forEach(e => {
     e.ts = NOW; // Assume the event is imminent, just to be safe.
     // We only have the HTML here, but this case should be very rare.
-    LOG.error('Failed to parse date: ' + e.descriptionHTML);
+    LOG.error('Failed to parse date: "%s"', e.descriptionHTML);
   });
   return events.map(e => { return {...e, hash: md5(e.descriptionHTML)};});
 }
@@ -684,7 +685,7 @@ async function sendEmails(emails) {
     }
     // Throttle outgoing emails.
     if (!first) {
-      LOG.info('Waiting ' + CONFIG.options.smtpWaitSeconds + ' seconds between messages');
+      LOG.info('Waiting %d seconds between messages', CONFIG.options.smtpWaitSeconds);
       await sleepSeconds(CONFIG.options.smtpWaitSeconds);
     }
     first = false;
@@ -720,7 +721,7 @@ async function createImapFlow() {
         await processNewEmail();
       })
       .on('exists', async (data) => {
-        LOG.info('Received new message(s): ' + JSON.stringify(data));
+        LOG.info('Received new message(s): %s', JSON.stringify(data));
         await processNewEmail();
       })
       // Without an error handler, errors crash the entire NodeJS env!
@@ -792,7 +793,7 @@ async function processNewEmail() {
     for (const recipient of recipients) {
       const teacherId = recipient.address.match(CONFIG.options.incomingEmailRegEx)[1];
       if (!teacherId) { // This still allows testing with "0" because it's a string.
-        LOG.warn('Failed to parse recipient "' + recipient.address + '"');
+        LOG.warn('Failed to parse recipient "%s"', recipient.address);
         continue; // Should never happen because we filtered recipients to match the RegEx above.
       }
 
@@ -801,9 +802,9 @@ async function processNewEmail() {
 
       const isReply = teacherId == replyTeacherId;
       LOG.info(
-        'Received ' + (isReply ? 'reply to ' : 'email for ') + recipient.name + ' (teacher ' 
-        + teacherId + '): "' + parsedMessage.subject + '" (' + parsedMessage.text.length 
-        + ' characters)');
+        'Received %s teacher %d (%s): "%s" (%d characters)',
+        isReply ? 'reply to ' : 'email for ', teacherId, recipient.name, 
+        parsedMessage.subject, parsedMessage.text.length);
       outbox.push({
         teacherId: teacherId,
         replyThreadId: isReply ? replyThreadId : undefined,
@@ -814,12 +815,12 @@ async function processNewEmail() {
       });
     }
   }
-  LOG.debug('New emails: ' + numNewMessages);
+  LOG.debug('New emails: %d', numNewMessages);
 
   if (Object.keys(ignoredMessages).length) {
     const seqs = Object.keys(ignoredMessages).join();
     await imapFlow.messageFlagsAdd({seq: seqs}, ['\\Answered']);
-    LOG.debug('Marked ignored emails: ' + seqs);
+    LOG.debug('Marked ignored emails: %s', seqs);
   }
 
   // For simplicity we awake unconditionally. We don't distinguish between new content notifications
@@ -832,17 +833,17 @@ async function processNewEmail() {
 async function markEmail(seq, done) {
   if (done) {
     await imapFlow.messageFlagsAdd({ seq: seq }, ['\\Answered']);
-    LOG.debug('Marked processed email: ' + seq);
+    LOG.debug('Marked processed email: %d', seq);
   } else {
     await imapFlow.messageFlagsRemove({ seq: seq }, ['\\Answered']);
-    LOG.debug('Marked unprocessed email: ' + seq);
+    LOG.debug('Marked unprocessed email: %d', seq);
   }
 }
 
 // ---------- Outgoing messages ----------
 
 async function sendMessagesToTeachers(page) {
-  LOG.info('Sending ' + outbox.length + ' messages to teachers');
+  LOG.info('Sending %d messages to teachers', outbox.length);
   for (const msg of outbox) {
     // Curiously navigation will always succeed, even for nonexistent teacher IDs. What's more, we
     // can actually send messages that we can then retrieve by navigating to the URL directly. This
@@ -887,7 +888,7 @@ async function sendMessagesToTeachers(page) {
       ]);
 
       if (response.ok()) {
-        LOG.info('Sent message' + logInfix + ' to teacher ' + msg.teacherId);
+        LOG.info('Sent message%s to teacher %d', logInfix, msg.teacherId);
         // The new thread is the first shown on the response page. Extract its ID and treat the
         // remaining parts as replies. The form shown on the response page is NOT associated with
         // this thread, but would open a new thread.
@@ -899,8 +900,8 @@ async function sendMessagesToTeachers(page) {
       } else {
         // TODO: Report this back, i.e. email the error to the user.
         LOG.error(
-            'Failed to send message ' + prefix + 'to teacher ' + msg.teacherId 
-            + ': ' + response.statusText);
+            'Failed to send message %sto teacher %d: %s',
+            prefix, msg.teacherId, response.statusText);
         // If we haven't posted any messages yet, we can retry this email.
         if (i == 0) {
           await msg.markNotDone();
@@ -1052,26 +1053,26 @@ async function main() {
   while (true) {
     const err = await main().catch(e => {
       // Winston's file transport silently swallows calls in quick succession, so concatenate.
-      LOG.error('Error in main loop:\n' + (e.stack || e));
+      LOG.error('Error in main loop:\n%s', e.stack || e);
       if (imapFlow) {
         imapFlow.close(); // logout() doesn't work when an operation is in progress
       }
     });
     if (typeof err !== 'undefined') {
-      LOG.info('Exiting with code ' + err);
+      LOG.info('Exiting with code %d', err);
       exit(err);
     }
 
     const nowEpochMillis = Date.now();
     const secondsSinceLastFailure = (nowEpochMillis - lastFailureEpochMillis) / 1000;
-    LOG.debug('Last failure was ' + secondsSinceLastFailure + ' seconds ago');
+    LOG.debug('Last failure was %d seconds ago', secondsSinceLastFailure);
     if (secondsSinceLastFailure > BACKOFF_TRIGGER_SECONDS) { // reset wait time
       retryWaitSeconds = DEFAULT_RETRY_WAIT_SECONDS;
     } else { // exponential backoff
       retryWaitSeconds =  Math.min(retryWaitSeconds * 2, MAX_RETRY_WAIT_SECONDS); 
     }
     lastFailureEpochMillis = nowEpochMillis;
-    LOG.info('Waiting ' + retryWaitSeconds + ' seconds before retry');
+    LOG.info('Waiting %d seconds before retry', retryWaitSeconds);
     await sleepSeconds(retryWaitSeconds);
     LOG.debug('Waiting completed');
   }
