@@ -1067,7 +1067,7 @@ async function main() {
     });
     await p;
 
-    checkImapConnection();
+    await checkImapConnection();
 
     if (imapReconnect) {
       imapReconnect = false;
