@@ -826,8 +826,9 @@ async function processNewEmail() {
 
       const isReply = teacherId == replyTeacherId;
       LOG.info(
-        'Received %s teacher %d (%s): "%s" (%d characters)',
-        isReply ? 'reply to ' : 'email for ', teacherId, recipient.name, 
+        'Received %s teacher %d%s: "%s" (%d characters)',
+        isReply ? 'reply to' : 'email for', teacherId, 
+        recipient.name ? ' (' + recipient.name + ')' : '',
         parsedMessage.subject, parsedMessage.text.length);
       outbox.push({
         teacherId: teacherId,
