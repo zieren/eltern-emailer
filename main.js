@@ -122,6 +122,7 @@ const imapLogger = {
     // The IMAP client can get stuck with nothing but a warning level log. So we do essentially the
     // same here as in the ImapFlow error handler, i.e. request a reconnect.
     imapReconnect = true;
+    // TODO: If we're not actually sleeping, this will have no effect.
     awake();
   },
   error: (o) => LOG.error('IMAP: %s', JSON.stringify(o)) 
@@ -760,7 +761,8 @@ async function createImapFlow() {
         // Further errors may follow, but we never clear the flag because once a transient error has
         // been observed, a reconnect will probably help regardless of subsequent problems.
         imapReconnect ||= IMAP_TRANSIENT_ERRORS.includes(e.code);
-          awake();
+        // TODO: If we're not actually sleeping, this will have no effect.
+        awake();
       });
   await imapFlow.connect();
   await imapFlow.mailboxOpen('INBOX');
@@ -820,16 +822,21 @@ async function processNewEmail() {
       delete ignoredMessages[message.seq];
 
       const isReply = teacherId == replyTeacherId;
+      // Empty subject or body are not accepted by the portal. Messages without subject don't even
+      // have a "subject" field. Defensively, assume the same for the body even though I haven't
+      // verified that.
+      const subject = (parsedMessage.subject || '').trim() || '(kein Betreff)';
+      const text = (parsedMessage.text || '').trim() || '(kein Text)';
       LOG.info(
         'Received %s teacher %d%s: "%s" (%d characters; ID %d)',
         isReply ? 'reply to' : 'email for', teacherId, 
         recipient.name ? ' (' + recipient.name + ')' : '',
-        parsedMessage.subject, parsedMessage.text.length, message.seq);
+        subject, text.length, message.seq);
       outbox.push({
         teacherId: teacherId,
         replyThreadId: isReply ? replyThreadId : undefined,
-        subject: isReply ? undefined : parsedMessage.subject,
-        text: parsedMessage.text,
+        subject: isReply ? undefined : subject,
+        text: text,
         markDone: async () => markEmailDone(message.seq)
       });
     }
@@ -877,26 +884,26 @@ async function sendMessagesToTeachers(page) {
     // TODO: Extract magic 512? Is that maybe even configurable?
     const capacity = msg.text.length <= 512 ? 512 : (512 - 8);
     const numParts = Math.ceil(msg.text.length / capacity);
-    const prefix = numParts == 1 ? '' : '[' + (i + 1) + '/' + numParts + '] ';
-    const logInfix = numParts == 1 ? '' : ' part ' + (i + 1) + '/' + numParts;
     let onReplyPage = false;
-
+    
     try {
       for (let i = 0; i < numParts; i++) {
         if (msg.replyThreadId) {
           if (!onReplyPage) {
             await page.goto(
-                CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/'
-                + msg.teacherId + '/_/' + msg.replyThreadId);
-            // We probably don't need load_all=1 here, assuming the reply box is always shown.
-            onReplyPage = true; // The form remains available after posting the reply.
-          } // else: We're already on the reply page.
-        } else { // create a new thread
-          await page.goto(
+              CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/'
+              + msg.teacherId + '/_/' + msg.replyThreadId);
+              // We probably don't need load_all=1 here, assuming the reply box is always shown.
+              onReplyPage = true; // The form remains available after posting the reply.
+            } // else: We're already on the reply page.
+          } else { // create a new thread
+            await page.goto(
               CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/' + msg.teacherId);
-          await page.type('#new_betreff', msg.subject);
-        }
-
+              await page.type('#new_betreff', msg.subject);
+            }
+            
+        const prefix = numParts == 1 ? '' : '[' + (i + 1) + '/' + numParts + '] ';
+        const logInfix = numParts == 1 ? '' : ' part ' + (i + 1) + '/' + numParts;
         await page.type(
             '#nachricht_kom_fach', prefix + msg.text.substring(i * capacity, (i + 1) * capacity));
 
@@ -929,7 +936,7 @@ async function sendMessagesToTeachers(page) {
       }
     } catch (e) {
       // TODO: Report this back, i.e. email the error to the user.
-      LOG.error('Failed to send message %sto teacher %d: %s', prefix, msg.teacherId, e);
+      LOG.error('Failed to send message to teacher %d: %s', msg.teacherId, e);
     }
   }
 }
