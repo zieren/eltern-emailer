@@ -760,7 +760,7 @@ async function createImapFlow() {
         // Further errors may follow, but we never clear the flag because once a transient error has
         // been observed, a reconnect will probably help regardless of subsequent problems.
         imapReconnect ||= IMAP_TRANSIENT_ERRORS.includes(e.code);
-        awake();
+          awake();
       });
   await imapFlow.connect();
   await imapFlow.mailboxOpen('INBOX');
@@ -801,11 +801,6 @@ async function processNewEmail() {
       continue; // The message isn't intended for us.
     }
 
-    // The 99% case. This allows marking the message not-done on failure because we can just retry
-    // from scratch. (In the >1 case it is also possible that all recipients fail, but this seems
-    // too rare to special case.)
-    const singleRecipient = recipients.length === 1;
-
     // For replies we get the teacher ID and thread ID from the In-Reply-To header, and we don't
     // need a subject. Other teachers may be among the recipients though, for these a new thread is
     // created.
@@ -826,17 +821,16 @@ async function processNewEmail() {
 
       const isReply = teacherId == replyTeacherId;
       LOG.info(
-        'Received %s teacher %d%s: "%s" (%d characters)',
+        'Received %s teacher %d%s: "%s" (%d characters; ID %d)',
         isReply ? 'reply to' : 'email for', teacherId, 
         recipient.name ? ' (' + recipient.name + ')' : '',
-        parsedMessage.subject, parsedMessage.text.length);
+        parsedMessage.subject, parsedMessage.text.length, message.seq);
       outbox.push({
         teacherId: teacherId,
         replyThreadId: isReply ? replyThreadId : undefined,
         subject: isReply ? undefined : parsedMessage.subject,
         text: parsedMessage.text,
-        markDone: async () => markEmail(message.seq, true),
-        markNotDone: singleRecipient ? async () => markEmail(message.seq, false) : () => {}
+        markDone: async () => markEmailDone(message.seq)
       });
     }
   }
@@ -855,86 +849,89 @@ async function processNewEmail() {
   }
 }
 
-async function markEmail(seq, done) {
-  if (done) {
-    await imapFlow.messageFlagsAdd({ seq: seq }, ['\\Answered']);
-    LOG.debug('Marked processed email: %d', seq);
-  } else {
-    await imapFlow.messageFlagsRemove({ seq: seq }, ['\\Answered']);
-    LOG.debug('Marked unprocessed email: %d', seq);
-  }
+async function markEmailDone(seq) {
+  await imapFlow.messageFlagsAdd({ seq: seq }, ['\\Answered']);
+  LOG.debug('Marked processed email: %d', seq);
 }
 
 // ---------- Outgoing messages ----------
 
 async function sendMessagesToTeachers(page) {
-  LOG.info('Sending %d messages to teachers', outbox.length);
-  for (const msg of outbox) {
-    // Curiously navigation will always succeed, even for nonexistent teacher IDs. What's more, we
-    // can actually send messages that we can then retrieve by navigating to the URL directly. This
-    // greatly simplifies testing :-)
+  LOG.info('Sending %d message(s) to teachers', outbox.length);
+  // Sidenote: Curiously navigation will always succeed, even for nonexistent teacher IDs. What's
+  // more, we can actually send messages that we can then retrieve by navigating to the URL
+  // directly. This greatly simplifies testing :-)
 
-    // In case of multiple messages we prefix them with "[n/N] ". Assuming that n and N have at most
-    // 2 characters, we simply substract 8 characters for every such prefix.
+  // For each message (part), sending may fail either in the "read" operation (navigating to the
+  // form) or in a "write" operation (clicking the "send" button). For simplicity we don't
+  // distinguish between the two. Also, we never retry the "write" operation to avoid the risk of
+  // flooding a teacher with messages. This means that each message must be removed from the global
+  // "outbox" variable after processing is complete. To guarantee this we make a local copy and
+  // clear the global variable right away.
+  const outboxTmp = outbox;
+  outbox = [];
+
+  for (const msg of outboxTmp) {
+    // In case of multiple messages we prefix them with "[n/N] ". Assuming that n and N have at
+    // most 2 characters, we simply substract 8 characters for every such prefix.
     // TODO: Extract magic 512? Is that maybe even configurable?
     const capacity = msg.text.length <= 512 ? 512 : (512 - 8);
-    const numMessages = Math.ceil(msg.text.length / capacity);
+    const numParts = Math.ceil(msg.text.length / capacity);
+    const prefix = numParts == 1 ? '' : '[' + (i + 1) + '/' + numParts + '] ';
+    const logInfix = numParts == 1 ? '' : ' part ' + (i + 1) + '/' + numParts;
     let onReplyPage = false;
-    for (let i = 0; i < numMessages; i++) {
-      if (msg.replyThreadId) {
-        if (!onReplyPage) {
+
+    try {
+      for (let i = 0; i < numParts; i++) {
+        if (msg.replyThreadId) {
+          if (!onReplyPage) {
+            await page.goto(
+                CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/'
+                + msg.teacherId + '/_/' + msg.replyThreadId);
+            // We probably don't need load_all=1 here, assuming the reply box is always shown.
+            onReplyPage = true; // The form remains available after posting the reply.
+          } // else: We're already on the reply page.
+        } else { // create a new thread
           await page.goto(
-              CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/'
-              + msg.teacherId + '/_/' + msg.replyThreadId);
-          // We probably don't need load_all=1 here, assuming the reply box is always shown.
-          onReplyPage = true; // The form remains available after posting the reply.
-        } // else: We're already on the reply page.
-      } else { // create a new thread
-        await page.goto(
-            CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/' + msg.teacherId);
-        await page.type('#new_betreff', msg.subject);
-      }
-
-      const prefix = numMessages == 1 ? '' : '[' + (i + 1) + '/' + numMessages + '] ';
-      const logInfix = numMessages == 1 ? '' : ' part ' + (i + 1) + '/' + numMessages;
-      await page.type(
-          '#nachricht_kom_fach', prefix + msg.text.substring(i * capacity, (i + 1) * capacity));
-
-      // We mark the original email done before actually submitting the form to avoid duplicate 
-      // messages in case of errors.
-      if (i == 0) {
-        await msg.markDone();
-      }
-
-      // Click the button to do the thing.
-      const [response] = await Promise.all([
-        page.waitForNavigation(),
-        page.click('button#send')
-      ]);
-
-      if (response.ok()) {
-        LOG.info('Sent message%s to teacher %d', logInfix, msg.teacherId);
-        // The new thread is the first shown on the response page. Extract its ID and treat the
-        // remaining parts as replies. The form shown on the response page is NOT associated with
-        // this thread, but would open a new thread.
-        if (numMessages > 1 && !msg.replyThreadId) {
-          msg.replyThreadId = await page.$eval(
-            'a[href*="meldungen/kommunikation_fachlehrer/"',
-            (a) => a.href.match(/.*\/([0-9]+)$/)[1]);
+              CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/' + msg.teacherId);
+          await page.type('#new_betreff', msg.subject);
         }
-      } else {
-        // TODO: Report this back, i.e. email the error to the user.
-        LOG.error(
-            'Failed to send message %sto teacher %d: %s',
-            prefix, msg.teacherId, response.statusText);
-        // If we haven't posted any messages yet, we can retry this email.
+
+        await page.type(
+            '#nachricht_kom_fach', prefix + msg.text.substring(i * capacity, (i + 1) * capacity));
+
+        // We mark the original email done before actually submitting the form to avoid duplicate 
+        // messages in case of errors. Unfortunately one incoming email may map to multiple parts,
+        // so we have to do it for the first part to be safe.
         if (i == 0) {
-          await msg.markNotDone();
+          await msg.markDone();
+        }
+
+        // Click the button to do the thing.
+        const [response] = await Promise.all([
+          page.waitForNavigation(),
+          page.click('button#send')
+        ]);
+
+        if (response.ok()) {
+          LOG.info('Sent message%s to teacher %d', logInfix, msg.teacherId);
+          // The new thread is the first shown on the response page. Extract its ID and treat the
+          // remaining parts as replies. The form shown on the response page is NOT associated with
+          // this thread, but would open a new thread.
+          if (numParts > 1 && !msg.replyThreadId) {
+            msg.replyThreadId = await page.$eval(
+              'a[href*="meldungen/kommunikation_fachlehrer/"',
+              (a) => a.href.match(/.*\/([0-9]+)$/)[1]);
+          }
+        } else {
+          throw '' + response.status() + ' ' + response.statusText();
         }
       }
+    } catch (e) {
+      // TODO: Report this back, i.e. email the error to the user.
+      LOG.error('Failed to send message %sto teacher %d: %s', prefix, msg.teacherId, e);
     }
   }
-  outbox = [];
 }
 
 // ---------- Main ----------
