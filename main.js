@@ -335,14 +335,17 @@ async function readActiveTeachers(page) {
   await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer');
   const teachers = await page.$$eval(
     // New messages cause a "Neu" indicator with the same href as the teacher. The :first-child
-    // selector avoids duplicates.
+    // selector prevents duplicates from that.
     'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]:first-child',
     (anchors) => anchors.map(
       (a) => {
+        // Some roles (e.g. director) are added after the name, separated by "<br>", which is 
+        // %-encoded. We strip that to get the name (in "last name first" order, in our school).
+        const m = a.href.match(/.*\/([0-9]+)\/(.*)/);
         return {
-          id: a.href.match(/.*\/([0-9]+)\//)[1],
+          id: m[1],
           url: a.href,
-          name: a.parentElement.parentElement.firstChild.textContent
+          name: decodeURI(m[2]).replace(/<.*/, '').replace(/_/g, ' ')
         };
       }));
   LOG.info('Found %d teachers with threads', teachers.length);
@@ -363,9 +366,13 @@ async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
           // We don't use the time of day because it's in 12h format and missing any am/pm
           // indication (sic). That is ridiculous, but it's still easily good enough for caching.
           const d = a.parentElement.previousSibling.textContent.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
+          // Extract teacher name and thread ID. In our school the teacher name used here is clean
+          // and in "first name first" order. First and last name are separated by '_'.
+          const m = a.href.match(/.*\/([^\/]*)\/([0-9]+)$/);
           return {
-            id: a.href.match(/.*\/([0-9]+)$/)[1],
+            id: m[2],
             url: a.href,
+            teacherName: decodeURI(m[1]).replace(/_/g, ' '),
             subject: a.textContent,
             // We add two days to the date to account for a) lacking time of day, and b) timezones.
             // There is no need to cut it close, the performance gain would not outweigh complexity.
@@ -376,10 +383,7 @@ async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
   }
 }
 
-/**
- * Populates threads with contents, i.e. individual messages. This is the only way to detect new
- * messages.
- */
+/** Populates threads with contents, i.e. individual messages. */
 async function readThreadsContents(page, teachers) {
   for (const teacher of teachers) {
     // TODO: Reverse this so we send in chronological order. We can simply sort numerically by
@@ -388,16 +392,21 @@ async function readThreadsContents(page, teachers) {
       await page.goto(thread.url + '?load_all=1'); // Prevent pagination (I hope).
       thread.messages = await page.$eval('div#last_messages',
           (div) => Array.from(div.children).map(row => {
+            // TODO: Document that this is for attachments. Rename "url" below, and handle mutliple.
             const a = row.querySelector('a.link_nachrichten');
             return {
-              author: row.querySelector('label.control-label span').textContent,
+              author: !!row.querySelector('label span.link_buchungen'), // resolved below
               body: row.querySelector('div div.form-control').textContent,
               url: a ? a.href : null
             };
           }));
+      // We can't access "teacher" from Puppeteer, so set "author" here.
+      thread.messages.forEach(m => {
+        m.author = m.author ? thread.teacherName : 'Eltern';
+      });
       LOG.debug(
           'Read %d recent messages with %s in "%s"',
-          thread.messages.length, teacher.name, thread.subject);
+          thread.messages.length, thread.teacherName, thread.subject);
     }
   }
 }
@@ -450,8 +459,12 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
             email.references = [buildMessageId(messageIdBase + (i - 1))];
           }
           if (CONFIG.options.incomingEmailAddressForForwarding) {
-            email.replyTo = CONFIG.options.incomingEmailAddressForForwarding
-                .replace('@', '+' + teacher.id + '@');
+            // We always put the teacher ID here, so the user can also reply to their own messages.
+            email.replyTo = 
+                '"' + thread.teacherName.replace(/"/g, '') + '" <'
+                + CONFIG.options.incomingEmailAddressForForwarding
+                    .replace('@', '+' + teacher.id + '@');
+                + '>';
           }
           emails.push({
             // We don't forge the date here because time of day is not available.
@@ -681,10 +694,7 @@ function createTestEmails(numEmails) {
   ];
 }
 
-/**
- * Centralizes setting of common email options. This is to prevent bugs where the recipient/sender
- * addresses are incorrect.
- */
+/** Centralizes setting of common email options. */
 function buildEmail(fromName, subject, options) {
   return {...{
     from: '"' + fromName.replace(/["\n]/g, '') + ' (EE)" <' + CONFIG.options.emailFrom + '>',
