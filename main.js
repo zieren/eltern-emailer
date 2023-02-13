@@ -213,23 +213,6 @@ async function downloadFile(file, options) {
   });
 }
 
-/** 
- * The IMAP connection is generally flaky, and unfortunately ImapFlow doesn't hide this. Besides
- * the synchronous measures we take (reconnect on error and on warning log), this is a
- * speculative measure to at least periodically check and possibly re-establish the connection.
-*/
-async function checkImapConnection() {
-  if (imapFlow) {
-    try {
-      await imapFlow.noop(); // runs on the server
-      LOG.debug('IMAP connection OK');
-    } catch (e) {
-      LOG.error('IMAP connection down');
-      imapReconnect = true;
-    }
-  }
-}
-
 // ---------- Login ----------
 
 /** This function does the thing. The login thing. You know? */
@@ -1080,8 +1063,6 @@ async function main() {
       }
     });
     await p;
-
-    await checkImapConnection();
 
     if (imapReconnect) {
       imapReconnect = false;
