@@ -76,7 +76,7 @@ const STATE_FILE = 'state.json';
  * These errors, (at least some of) which may be emitted by the ImapFlow object, trigger a 
  * reconnect. This list is copied from imap-flow.js, which calls these errors "noise" :-).
  */
-const IMAP_TRANSIENT_ERRORS = ['Z_BUF_ERROR', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'EHOSTUNREACH'];
+const IMAP_RECONNECT_ERRORS = ['Z_BUF_ERROR', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'EHOSTUNREACH'];
 
 // ---------- Retry throttling ----------
 
@@ -99,8 +99,16 @@ let NOW = null;
 let CONFIG = {}, LOG = null;
 /** The IMAP client. */
 let imapFlow = null;
-/** This is set from the ImapFlow 'error' event handler. It triggers a retry. */
-let imapReconnect = false;
+/** 
+ * This is set from the ImapFlow 'error' event handler (and equivalent locations). It triggers a
+ * retry of the main loop. This will cause a new ImapFlow instance to be created. This is
+ * essentially a workaround to the IDLE connection failing in certain situations, e.g. on Windows
+ * suspend/resume. ImapFlow already has an option (maxIdleTime) to reestablish the IDLE connection
+ * periodically, but I'm concerned that doing that too often may cause server-side throttling or
+ * other problems, and doing it only every, say, 60 minutes would feel to slow. Also, we may
+ * encounter permanent errors that do require a reconnect.
+ */
+let imapNeedsNewInstance = false;
 /** Synchronization between IMAP event listener and main loop. */
 let awake = () => {}; // Event handler may fire before the main loop builds the wait Promise.
 /** 
@@ -120,8 +128,8 @@ const imapLogger = {
   warn: (o) => {
     LOG.warn('IMAP: %s', JSON.stringify(o));
     // The IMAP client can get stuck with nothing but a warning level log. So we do essentially the
-    // same here as in the ImapFlow error handler, i.e. request a reconnect.
-    imapReconnect = true;
+    // same here as in the ImapFlow error handler, i.e. request a new instance.
+    imapNeedsNewInstance = true;
     // TODO: If we're not actually sleeping, this will have no effect.
     awake();
   },
@@ -620,9 +628,10 @@ async function readEvents(page, previousHashes, emails) {
       events.filter(e => e.ts >= todayZeroTs && e.ts <= lookaheadTs).sort((a, b) => a.ts - b.ts);
   const numNewEvents = upcomingEvents.filter(e => !(e.hash in previousHashes)).length;
 
+  LOG.info('New upcoming events: %d', numNewEvents);
+
   // Create emails.
   if (!numNewEvents) {
-    LOG.debug('No new upcoming events');
     return;
   }
   let emailHTML = '<!DOCTYPE html><html><head><title>Bevorstehende Termine</title>'
@@ -731,6 +740,9 @@ async function sendEmails(emails) {
 /** Create the ImapFlow client, configure its event handlers and open the mailbox. */
 async function createImapFlow() {
   imapFlow = new ImapFlow(CONFIG.imap);
+  // The old instance's error handler may set this to true again during logout()/close(), so we
+  // clear it only now.
+  imapNeedsNewInstance = false;
   // Check for new messages on open, and whenever the # of existing messages changes.
   imapFlow
       .on('mailboxOpen', async () => {
@@ -746,14 +758,13 @@ async function createImapFlow() {
       // Background: https://nodejs.dev/en/api/v19/events/
       .on('error', (e) => {
         // Error details were already logged by our custom logger.
-        // If we lost the connection to the IMAP server, which can happen e.g. after a Windows
+        // If we lost the IDLE connection to the IMAP server, which can happen e.g. after a Windows
         // suspend->resume cycle, or simply in case of random network issues, the ImapFlow object
-        // emits an ECONNRESET event. Presumably other transient errors may happen as well. We
-        // request a reconnect and terminate the waiting in the main loop. The main loop will then
-        // throw an exception, triggering the regular retry with exponential backoff.
-        // Further errors may follow, but we never clear the flag because once a transient error has
+        // emits an error event. We request a reconnect and terminate the waiting in the main loop.
+        // The main loop will then throw an exception, triggering the regular retry with exponential
+        // backoff. Further errors may follow, but we never clear the flag because once an error has
         // been observed, a reconnect will probably help regardless of subsequent problems.
-        imapReconnect ||= IMAP_TRANSIENT_ERRORS.includes(e.code);
+        imapNeedsNewInstance ||= IMAP_RECONNECT_ERRORS.includes(e.code);
         // TODO: If we're not actually sleeping, this will have no effect.
         awake();
       });
@@ -834,7 +845,7 @@ async function processNewEmail() {
       });
     }
   }
-  LOG.debug('New emails: %d', numNewMessages);
+  LOG.info('New incoming emails: %d', numNewMessages);
 
   if (Object.keys(ignoredMessages).length) {
     const seqs = Object.keys(ignoredMessages).join();
@@ -1055,7 +1066,7 @@ async function main() {
       // Only now can the IMAP receive event handler awake us. It could already have populated the
       // outbox and notified the previous Promise while the main loop was busy, so check for that.
       // It could also have requested a reconnect.
-      if (outbox.length || imapReconnect) {
+      if (outbox.length || imapNeedsNewInstance) {
         resolve();
       } else {
         LOG.debug('Waiting %d minutes until next check', CONFIG.options.checkIntervalMinutes);
@@ -1064,8 +1075,7 @@ async function main() {
     });
     await p;
 
-    if (imapReconnect) {
-      imapReconnect = false;
+    if (imapNeedsNewInstance) {
       throw 'Triggering IMAP reconnect'; // Trigger retry with exponential backoff.
     }
   }
@@ -1073,16 +1083,26 @@ async function main() {
 
 (async () => {
   while (true) {
-    const err = await main().catch(e => {
+    let retval = 0;
+    try {
+      retval = await main();
+    } catch (e) {
       // Winston's file transport silently swallows calls in quick succession, so concatenate.
       LOG.error('Error in main loop:\n%s', e.stack || e);
       if (imapFlow) {
-        imapFlow.close(); // logout() doesn't work when an operation is in progress
+        // Try to logout() gracefully. In some conditions (e.g. when an operation is in progress)
+        // this won't work and we can only close().
+        try {
+          await imapFlow.logout();
+        } catch (e) {
+          // ignored
+        }
+        imapFlow.close();
       }
-    });
-    if (typeof err !== 'undefined') {
-      LOG.info('Exiting with code %d', err);
-      exit(err);
+    }
+    if (typeof retval !== 'undefined') {
+      LOG.info('Exiting with code %d', retval);
+      exit(retval);
     }
 
     const nowEpochMillis = Date.now();
