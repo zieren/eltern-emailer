@@ -72,12 +72,6 @@ const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
  */
 const STATE_FILE = 'state.json';
 
-/** 
- * These errors, (at least some of) which may be emitted by the ImapFlow object, trigger a 
- * reconnect. This list is copied from imap-flow.js, which calls these errors "noise" :-).
- */
-const IMAP_RECONNECT_ERRORS = ['Z_BUF_ERROR', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'EHOSTUNREACH'];
-
 // ---------- Retry throttling ----------
 
 /** Seconds to wait after a failure, assuming no recent previous failure. */
@@ -99,16 +93,6 @@ let NOW = null;
 let CONFIG = {}, LOG = null;
 /** The IMAP client. */
 let imapFlow = null;
-/** 
- * This is set from the ImapFlow 'error' event handler (and equivalent locations). It triggers a
- * retry of the main loop. This will cause a new ImapFlow instance to be created. This is
- * essentially a workaround to the IDLE connection failing in certain situations, e.g. on Windows
- * suspend/resume. ImapFlow already has an option (maxIdleTime) to reestablish the IDLE connection
- * periodically, but I'm concerned that doing that too often may cause server-side throttling or
- * other problems, and doing it only every, say, 60 minutes would feel to slow. Also, we may
- * encounter permanent errors that do require a reconnect.
- */
-let imapNeedsNewInstance = false;
 /** Synchronization between IMAP event listener and main loop. */
 let awake = () => {}; // Event handler may fire before the main loop builds the wait Promise.
 /** 
@@ -121,20 +105,22 @@ let awake = () => {}; // Event handler may fire before the main loop builds the 
  * reinstalls or deletion of the status file.
  */
 let outbox = [];
-/** Wrap logger for IMAP, stripping all fields except msg. */
+/** Forward IMAP logging to our own logger. */
 const imapLogger = {
   debug: (o) => {}, // This is too noisy.
   info: (o) => LOG.info('IMAP: %s', JSON.stringify(o)),
+  // Some errors don't trigger the error handler, but only show up as an error or even just warning
+  // level log. We do the same here as we do in the error handler; see there for comments.
   warn: (o) => {
     LOG.warn('IMAP: %s', JSON.stringify(o));
-    // The IMAP client can get stuck with nothing but a warning level log. So we do essentially the
-    // same here as in the ImapFlow error handler, i.e. request a new instance.
-    imapNeedsNewInstance = true;
-    // TODO: If we're not actually sleeping, this will have no effect.
+    LOG.info('Awakening main loop');
     awake();
   },
-  error: (o) => LOG.error('IMAP: %s', JSON.stringify(o)) 
-  // The ImapFlow error handler initiates reconnect, so no need to do it here.
+  error: (o) => {
+    LOG.error('IMAP: %s', JSON.stringify(o));
+    LOG.info('Awakening main loop');
+    awake();
+  } 
 };
 
 // ---------- Initialization functions ----------
@@ -740,9 +726,6 @@ async function sendEmails(emails) {
 /** Create the ImapFlow client, configure its event handlers and open the mailbox. */
 async function createImapFlow() {
   imapFlow = new ImapFlow(CONFIG.imap);
-  // The old instance's error handler may set this to true again during logout()/close(), so we
-  // clear it only now.
-  imapNeedsNewInstance = false;
   // Check for new messages on open, and whenever the # of existing messages changes.
   imapFlow
       .on('mailboxOpen', async () => {
@@ -758,20 +741,55 @@ async function createImapFlow() {
       // Background: https://nodejs.dev/en/api/v19/events/
       .on('error', (e) => {
         // Error details were already logged by our custom logger.
-        // If we lost the IDLE connection to the IMAP server, which can happen e.g. after a Windows
-        // suspend->resume cycle, or simply in case of random network issues, the ImapFlow object
-        // emits an error event. We request a reconnect and terminate the waiting in the main loop.
-        // The main loop will then throw an exception, triggering the regular retry with exponential
-        // backoff. Further errors may follow, but we never clear the flag because once an error has
-        // been observed, a reconnect will probably help regardless of subsequent problems.
-        imapNeedsNewInstance ||= IMAP_RECONNECT_ERRORS.includes(e.code);
-        // TODO: If we're not actually sleeping, this will have no effect.
+        // AFAICT the IMAP client has two common types of errors:
+        // 1. The IDLE connection fails, commonly e.g. after an OS suspend/resume cycle (tested on
+        //    Windows, presumably applies also to others).
+        // 2. The main connection fails (not sure what common triggers are).
+        // We address the first case by ImapFlow's maxIdleTime option (set on creation). The second
+        // case can be detected by running an IMAP NOOP command. This is routinely done at the end
+        // of each crawl iteration. We prepone that iteration here, in case the main loop is
+        // currently waiting.
+        LOG.info('Awakening main loop');
         awake();
       });
   await imapFlow.connect();
   await imapFlow.mailboxOpen('INBOX');
   LOG.info('Listening on IMAP mailbox')
   return imapFlow;
+}
+
+/** 
+ * Check the main IMAP connection by running a NOOP command, and log the result. Rethrows the
+ * original error on failure.
+ */
+async function checkImapConnection() {
+  if (imapFlow) {
+    try {
+      await imapFlow.noop(); // runs on the server
+      LOG.debug('IMAP connection OK');
+    } catch (e) {
+      LOG.error('IMAP connection down'); // The outer (retry) loop will log the error details.
+      throw e;
+    }
+  }
+}
+
+/** 
+ * Try to logout() gracefully. In some conditions (e.g. when an operation is in progress) this won't
+ * work and we can only close(). 
+ */
+async function disposeImapFlow() {
+  if (imapFlow) {
+    try {
+      await imapFlow.logout();
+      LOG.debug('Logged out of IMAP server');
+    } catch (e) {
+      // ignored
+      LOG.debug('Failed to log out of IMAP server');
+    }
+    imapFlow.close();
+    LOG.debug('Closed IMAP connection');
+  }
 }
 
 /** This uses the "answered" flag, which is part of the IMAP standard, to mark messages done. */
@@ -959,6 +977,7 @@ async function main() {
 
   CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
   CONFIG.imap.logger = imapLogger; // standing orders
+  CONFIG.imap.maxIdleTime ||= 60 * 1000; // 60s default
   LOG = createLogger();
   LOG.info(TITLE);
 
@@ -1060,50 +1079,56 @@ async function main() {
       return 0;
     }
 
-    // Wait until timeout, email received or IMAP reconnect request.
-    const p = new Promise((resolve) => {
+    await checkImapConnection();
+    // There is now a short time window for a race, where an error after the successful check above
+    // would awake() the previous Promise before "awake" is updated to the new Promise below. This
+    // seems very unlikely though, and would just delay the IMAP restart until we check again in the
+    // next iteration.
+
+    // Wait until timeout or email received. The email may or may not be a "new message" 
+    // notification. We don't care and do the next crawl unconditionally.
+    await new Promise((resolve) => {
       awake = resolve;
       // Only now can the IMAP receive event handler awake us. It could already have populated the
       // outbox and notified the previous Promise while the main loop was busy, so check for that.
-      // It could also have requested a reconnect.
-      if (outbox.length || imapNeedsNewInstance) {
+      if (outbox.length) {
         resolve();
       } else {
         LOG.debug('Waiting %d minutes until next check', CONFIG.options.checkIntervalMinutes);
         setTimeout(resolve, CONFIG.options.checkIntervalMinutes * 60 * 1000);
       }
     });
-    await p;
-
-    if (imapNeedsNewInstance) {
-      throw 'Triggering IMAP reconnect'; // Trigger retry with exponential backoff.
-    }
   }
 };
 
 (async () => {
   while (true) {
-    let retval = 0;
     try {
-      retval = await main();
+      const retval = await main();
+      // Normal completion means we exit.
+
+      // Ensure logs are flushed.
+      LOG.on('finish', function (_) {
+        exit(retval);
+      });
+      LOG.info('Exiting with code %d', retval);
+      LOG.end();
+      // Allow 1 minute for the graceful flushing shutdown above, else exit ungracefully.
+      await sleepSeconds(60); 
+      exit(retval);
     } catch (e) {
       // Winston's file transport silently swallows calls in quick succession, so concatenate.
       LOG.error('Error in main loop:\n%s', e.stack || e);
-      if (imapFlow) {
-        // Try to logout() gracefully. In some conditions (e.g. when an operation is in progress)
-        // this won't work and we can only close().
-        try {
-          await imapFlow.logout();
-        } catch (e) {
-          // ignored
-        }
-        imapFlow.close();
-      }
     }
-    if (typeof retval !== 'undefined') {
-      LOG.info('Exiting with code %d', retval);
-      exit(retval);
-    }
+
+    // The main loop threw an exception. Rerun with exponential backoff. This addresses transient
+    // errors, e.g. IMAP connection issues or crawl timeouts. Permanent errors, e.g. page layout
+    // changes that break the crawling code, lead to retries every MAX_RETRY_WAIT_SECONDS, which
+    // should be high enough for this to not be a problem. Note that we prevent duplicate messages
+    // to teachers via persistent IMAP message flags, but do not take special precautions against
+    // duplicate emails to parents. The latter case seems rather unlikely and much less serious.
+
+    await disposeImapFlow();
 
     const nowEpochMillis = Date.now();
     const secondsSinceLastFailure = (nowEpochMillis - lastFailureEpochMillis) / 1000;
