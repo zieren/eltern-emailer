@@ -75,7 +75,7 @@ const STATE_FILE = 'state.json';
 // ---------- Retry throttling ----------
 
 /** Seconds to wait after a failure, assuming no recent previous failure. */
-const DEFAULT_RETRY_WAIT_SECONDS = 60; // 1m
+const DEFAULT_RETRY_WAIT_SECONDS = 15;
 /** If the last failure was less than this ago, back off exponentially. */
 const BACKOFF_TRIGGER_SECONDS = 60 * 60; // 1h
 /** Maximum time to wait in exponential backoff. */
@@ -113,12 +113,10 @@ const imapLogger = {
   // level log. We do the same here as we do in the error handler; see there for comments.
   warn: (o) => {
     LOG.warn('IMAP: %s', JSON.stringify(o));
-    LOG.info('Awakening main loop');
     awake();
   },
   error: (o) => {
     LOG.error('IMAP: %s', JSON.stringify(o));
-    LOG.info('Awakening main loop');
     awake();
   } 
 };
@@ -749,7 +747,6 @@ async function createImapFlow() {
         // case can be detected by running an IMAP NOOP command. This is routinely done at the end
         // of each crawl iteration. We prepone that iteration here, in case the main loop is
         // currently waiting.
-        LOG.info('Awakening main loop');
         awake();
       });
   await imapFlow.connect();
@@ -1088,7 +1085,10 @@ async function main() {
     // Wait until timeout or email received. The email may or may not be a "new message" 
     // notification. We don't care and do the next crawl unconditionally.
     await new Promise((resolve) => {
-      awake = resolve;
+      awake = function() {
+        LOG.info('Awakening main loop');
+        resolve();
+      };
       // Only now can the IMAP receive event handler awake us. It could already have populated the
       // outbox and notified the previous Promise while the main loop was busy, so check for that.
       if (outbox.length) {
