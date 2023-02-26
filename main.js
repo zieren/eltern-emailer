@@ -104,7 +104,7 @@ let awake = () => {}; // Event handler may fire before the main loop builds the 
  * partial success, but that is a rare case anyway. On the upside the IMAP flag will persist across
  * reinstalls or deletion of the status file.
  */
-let outbox = [];
+let outbound = [];
 /** Forward IMAP logging to our own logger. */
 const imapLogger = {
   debug: (o) => {}, // This is too noisy.
@@ -851,7 +851,7 @@ async function processNewEmail() {
         isReply ? 'reply to' : 'email for', teacherId, 
         recipient.name ? ' (' + recipient.name + ')' : '',
         subject, text.length, message.seq);
-      outbox.push({
+      outbound.push({
         teacherId: teacherId,
         replyThreadId: isReply ? replyThreadId : undefined,
         subject: isReply ? undefined : subject,
@@ -883,21 +883,21 @@ async function markEmailDone(seq) {
 // ---------- Outgoing messages ----------
 
 async function sendMessagesToTeachers(page) {
-  LOG.info('Sending %d message(s) to teachers', outbox.length);
+  LOG.info('Sending %d message(s) to teachers', outbound.length);
   // Sidenote: Curiously navigation will always succeed, even for nonexistent teacher IDs. What's
   // more, we can actually send messages that we can then retrieve by navigating to the URL
   // directly. This greatly simplifies testing :-)
 
   // For each message (part), sending may fail either in the "read" operation (navigating to the
-  // form) or in a "write" operation (clicking the "send" button). For simplicity we don't
+  // form) or in the "write" operation (clicking the "send" button). For simplicity we don't
   // distinguish between the two. Also, we never retry the "write" operation to avoid the risk of
   // flooding a teacher with messages. This means that each message must be removed from the global
-  // "outbox" variable after processing is complete. To guarantee this we make a local copy and
+  // "outbound" variable after processing is complete. To guarantee this we make a local copy and
   // clear the global variable right away.
-  const outboxTmp = outbox;
-  outbox = [];
+  const outboundTmp = outbound;
+  outbound = [];
 
-  for (const msg of outboxTmp) {
+  for (const msg of outboundTmp) {
     // In case of multiple messages we prefix them with "[n/N] ". Assuming that n and N have at
     // most 2 characters, we simply substract 8 characters for every such prefix.
     // TODO: Extract magic 512? Is that maybe even configurable?
@@ -1089,9 +1089,10 @@ async function main() {
         LOG.info('Awakening main loop');
         resolve();
       };
-      // Only now can the IMAP receive event handler awake us. It could already have populated the
-      // outbox and notified the previous Promise while the main loop was busy, so check for that.
-      if (outbox.length) {
+      // Only now can the IMAP receive event handler awake us. It could already have populated
+      // "outbound" and notified the previous Promise while the main loop was busy, so check for 
+      // that.
+      if (outbound.length) {
         resolve();
       } else {
         LOG.debug('Waiting %d minutes until next check', CONFIG.options.checkIntervalMinutes);
