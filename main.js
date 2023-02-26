@@ -96,15 +96,21 @@ let imapFlow = null;
 /** Synchronization between IMAP event listener and main loop. */
 let awake = () => {}; // Event handler may fire before the main loop builds the wait Promise.
 /** 
- * Outbound messages received asynchronously. Each has a "prep" handler that must complete 
- * successfully before actually sending. This handler will mark the original email that triggered
- * this message as answered in IMAP to avoid duplicate messages to teachers in case of errors (e.g.
- * when the message to the teacher is sent, but the email in the IMAP inbox cannot be marked
- * processed). Using an IMAP flag instead of the status file has the downside that it cannot express
- * partial success, but that is a rare case anyway. On the upside the IMAP flag will persist across
- * reinstalls or deletion of the status file.
+ * Outbound messages are intended for teachers. They are received asynchronously via IMAP and posted
+ * on the portal. Each has a "prep" handler that must complete successfully before actually sending.
+ * This handler will mark the original email that triggered this message as answered in IMAP to
+ * avoid duplicate messages to teachers in case of errors (e.g. when the message to the teacher is
+ * sent, but the email in the IMAP inbox cannot be marked processed). Using an IMAP flag instead of
+ * the status file has the downside that it cannot express partial success, but that is a rare case
+ * anyway. On the upside the IMAP flag will persist across reinstalls or deletion of the status
+ * file.
  */
 let outbound = [];
+/**
+ * Inbound messages are intended for the user(s). They are received in the portal in a crawl
+ * iteration (i.e. synchronously) and emailed to the user(s) via SMTP.
+ */
+let inbound = [];
 /** Forward IMAP logging to our own logger. */
 const imapLogger = {
   debug: (o) => {}, // This is too noisy.
@@ -270,7 +276,7 @@ async function readAnnouncementsAttachments(page, announcements, processedAnnoun
   }
 }
 
-function buildEmailsForAnnouncements(page, announcements, processedAnnouncements, emails) {
+function buildEmailsForAnnouncements(page, announcements, processedAnnouncements) {
   announcements
       .filter(a => !(a.id in processedAnnouncements))
       // Send oldest announcements first, i.e. maintain chronological order. This is not reliable
@@ -300,7 +306,7 @@ function buildEmailsForAnnouncements(page, announcements, processedAnnouncements
             processedAnnouncements[a.id] = 1;
           }
         };
-      }).forEach(e => emails.push(e));
+      }).forEach(e => inbound.push(e));
 }
 
 // ---------- Threads ----------
@@ -405,7 +411,7 @@ async function readThreadsAttachments(page, teachers, processedThreads) {
   }
 }
 
-function buildEmailsForThreads(teachers, processedThreads, emails) {
+function buildEmailsForThreads(teachers, processedThreads) {
   for (const teacher of teachers) {
     for (const thread of teacher.threads) {
       if (!(thread.id in processedThreads)) {
@@ -441,7 +447,7 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
                     .replace('@', '+' + teacher.id + '@');
                 + '>';
           }
-          emails.push({
+          inbound.push({
             // We don't forge the date here because time of day is not available.
             email: email,
             ok: () => { processedThreads[thread.id][i] = 1; }
@@ -450,7 +456,6 @@ function buildEmailsForThreads(teachers, processedThreads, emails) {
       }
     }
   }
-  return emails;
 }
 // ---------- Inquiries ----------
 
@@ -471,7 +476,7 @@ async function readInquiries(page) {
   return inquiries.reverse();
 }
 
-function buildEmailsForInquiries(inquiries, processedInquiries, emails) {
+function buildEmailsForInquiries(inquiries, processedInquiries) {
   for (const [i, inquiry] of Object.entries(inquiries)) {
     if (!(i in processedInquiries)) {
       // This indicates the next index to process.
@@ -489,7 +494,7 @@ function buildEmailsForInquiries(inquiries, processedInquiries, emails) {
       if (j > 0) {
         email.references = [buildMessageId('inquiry-' + i + '-' + (j - 1))];
       }
-      emails.push({
+      inbound.push({
         // We don't forge the date here because time of day is not available.
         email: email,
         ok: () => { processedInquiries[i] = j + 1; }
@@ -501,7 +506,7 @@ function buildEmailsForInquiries(inquiries, processedInquiries, emails) {
 
 // ---------- Substitutions ----------
 
-async function readSubstitutions(page, previousHashes, emails) {
+async function readSubstitutions(page, previousHashes) {
   await page.goto(CONFIG.elternportal.url + '/service/vertretungsplan');
   const originalHTML = await page.$eval('div#asam_content', (div) => div.innerHTML);
   const hash = md5(originalHTML);
@@ -516,13 +521,13 @@ async function readSubstitutions(page, previousHashes, emails) {
       + '<body>' + originalHTML + '</body></html>';
   let emailsLeft = (doParent && doStudent) ? 2 : 1;
   if (doParent) {
-    emails.push({
+    inbound.push({
       email: buildEmail('Vertretungsplan', 'Vertretungsplan', {html: modifiedHTML}),
       ok: () => { if (!--emailsLeft) previousHashes.subs = hash; }
     });
   }
   if (doStudent) {
-    emails.push({
+    inbound.push({
       email: buildEmail('Vertretungsplan', 'Vertretungsplan', 
                  {html: modifiedHTML, to: CONFIG.options.emailToStudent}),
       ok: () => { if (!--emailsLeft) previousHashes.subs = hash; }
@@ -533,7 +538,7 @@ async function readSubstitutions(page, previousHashes, emails) {
 
 // ---------- Notice board ----------
 
-async function readNoticeBoard(page, previousHashes, emails) {
+async function readNoticeBoard(page, previousHashes) {
   await page.goto(CONFIG.elternportal.url + '/aktuelles/schwarzes_brett');
   const gridItemsHTML =
       await page.$$eval('div.grid-item', (divs) => divs.map(div => div.innerHTML));
@@ -546,7 +551,7 @@ async function readNoticeBoard(page, previousHashes, emails) {
     }
     LOG.info('Found notice board message');
     newHashes[hash] = false;
-    emails.push({
+    inbound.push({
       email: buildEmail('Schwarzes Brett', 'Schwarzes Brett', {html: gridItemHTML}),
       ok: () => { newHashes[hash] = true; }
     });
@@ -588,7 +593,7 @@ async function readEventsInternal(page) {
   return events.map(e => { return {...e, hash: md5(e.descriptionHTML)};});
 }
 
-async function readEvents(page, previousHashes, emails) {
+async function readEvents(page, previousHashes) {
   // An event is considered expired on the next day. We store events with a time of day of 0:00:00,
   // so we compute the timestamp for 0:00:00 today and prune events before then.
   const todayZeroDate = new Date(NOW);
@@ -632,12 +637,12 @@ async function readEvents(page, previousHashes, emails) {
   emailHTML += '</table></body></html>';
   const doStudent = !!CONFIG.options.emailToStudent;
   let emailsLeft = doStudent ? 2 : 1;
-  emails.push({
+  inbound.push({
     email: buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', {html: emailHTML}),
     ok: () => { if (--emailsLeft) upcomingEvents.forEach(e => previousHashes[e.hash] = e.ts); }
   });
   if (doStudent) {
-    emails.push({
+    inbound.push({
       email: buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', 
                  {html: emailHTML, to: CONFIG.options.emailToStudent}),
       ok: () => { if (--emailsLeft) upcomingEvents.forEach(e => previousHashes[e.hash] = e.ts); }
@@ -681,14 +686,15 @@ function buildEmail(fromName, subject, options) {
 
 // ---------- Email sending ----------
 
-async function sendEmails(emails) {
-  LOG.info('Sending %d email(s)', emails.length);
-  if (!emails.length) {
+async function sendEmails() {
+  LOG.info('Sending %d email(s)', inbound.length);
+  if (!inbound.length) {
     return;
   }
   const transport = nodemailer.createTransport(CONFIG.smtp);
   let first = true;
-  for (const e of emails) {
+  let carryover = []; // Collects messages to retry next time.
+  for (const e of inbound) {
     if (CONFIG.options.mute) {
       LOG.info('Not sending email "%s" to %s', e.email.subject, e.email.to);
       await e.ok();
@@ -706,6 +712,7 @@ async function sendEmails(emails) {
       transport.sendMail(e.email, (error, info) => {
         if (error) {
           LOG.error('Failed to send email: %s', error);
+          carryover.push(e);
           resolve(false);
         } else {
           LOG.debug('Email sent (%s)', info.response);
@@ -717,6 +724,11 @@ async function sendEmails(emails) {
       await e.ok();
     }
   }
+  if (carryover.length) {
+    LOG.error(
+        '%d out of %d email(s) could not be sent, will retry', carryover.length, inbound.length);
+  }
+  inbound = carryover; // clears inbound, or else requeues emails for retry
 }
 
 // ---------- Incoming email ----------
@@ -1024,7 +1036,6 @@ async function main() {
     const page = await browser.newPage();
 
     await login(page);
-    const emails = [];
 
     // Send messages to teachers. We later retrieve those messages when crawling threads below. That
     // is intentional because presumably the second parent wants a copy of the message.
@@ -1033,34 +1044,35 @@ async function main() {
     // Section "Aktuelles".
     const announcements = await readAnnouncements(page); // Always reads all.
     await readAnnouncementsAttachments(page, announcements, state.announcements);
-    buildEmailsForAnnouncements(page, announcements, state.announcements, emails);
+    buildEmailsForAnnouncements(page, announcements, state.announcements);
 
     // Section "Kommunikation Eltern/Klassenleitung".
     const inquiries = await readInquiries(page);
-    buildEmailsForInquiries(inquiries, state.inquiries, emails);
+    buildEmailsForInquiries(inquiries, state.inquiries);
 
     // Section "Kommunikation Eltern/Fachlehrer".
     const teachers = await readActiveTeachers(page);
     await readThreadsMeta(page, teachers, state.lastSuccessfulRun);
     await readThreadsContents(page, teachers);
     await readThreadsAttachments(page, teachers, state.threads);
-    buildEmailsForThreads(teachers, state.threads, emails);
+    buildEmailsForThreads(teachers, state.threads);
 
     // Section "Vertretungsplan"
-    await readSubstitutions(page, state.hashes, emails);
+    await readSubstitutions(page, state.hashes);
 
     // Section "Schwarzes Brett"
-    await readNoticeBoard(page, state.hashes, emails);
+    await readNoticeBoard(page, state.hashes);
 
     // Section "Schulaufgaben / Weitere Termine"
-    await readEvents(page, state.hashes.events, emails);
+    await readEvents(page, state.hashes.events);
 
     // Send emails to user and possibly update state.
     if (CONFIG.options.test) {
-      await sendEmails(createTestEmails(emails.length));
-      // Don't update state.
+      // Replace actual emails and don't update state.
+      inbound = createTestEmails(inbound.length);
+      await sendEmails();
     } else {
-      await sendEmails(emails);
+      await sendEmails();
       state.lastSuccessfulRun = NOW;
       fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
     }
