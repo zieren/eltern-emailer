@@ -727,6 +727,8 @@ async function sendEmails() {
   if (carryover.length) {
     LOG.error(
         '%d out of %d email(s) could not be sent, will retry', carryover.length, inbound.length);
+    // TODO: Create error email here.
+    // carryover.push(createErrorEmail('blah...'));
   }
   inbound = carryover; // clears inbound, or else requeues emails for retry
 }
@@ -796,8 +798,14 @@ async function disposeImapFlow() {
       // ignored
       LOG.debug('Failed to log out of IMAP server');
     }
-    imapFlow.close();
-    LOG.debug('Closed IMAP connection');
+    try {
+      imapFlow.close();
+      LOG.debug('Closed IMAP connection');
+    } catch (e) {
+      // ignored
+      LOG.debug('Failed to close IMAP connection');
+    }
+    imapFlow = null;
   }
 }
 
