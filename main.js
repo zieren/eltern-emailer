@@ -1021,8 +1021,10 @@ async function main() {
         return 3;
       }
       if (e.code == 'ENOTFOUND') {
-        LOG.error('IMAP server not found');
-        return 4;
+        LOG.error('IMAP server not found (will retry)');
+        // This can be permanent (e.g. typo) or transient (e.g. just resumed from OS suspended state 
+        // and network not yet up, or some other temporary network issue). We don't bother telling
+        // these cases apart because the permanent case is rare and easily identified and fixed.
       }
       // Occasionally we get "some other error" (hooray for implicit typing...). We assume here
       // that all errors not handled above are transient, which may be wrong but shouldn't cause
