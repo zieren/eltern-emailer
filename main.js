@@ -1130,17 +1130,15 @@ async function main() {
       const retval = await main();
       // Normal completion means we exit.
 
-      // Ensure logs are flushed.
-      LOG.on('finish', function (_) {
-        exit(retval);
-      });
+      // Flushing Winston's file stream on exit is nontrivial
+      // (https://stackoverflow.com/questions/58933772). We go with the simple, readable, thoroughly
+      // ridiculous hack of just waiting a few seconds. Terminating the program is a rare event, so
+      // this seems acceptable.
       LOG.info('Exiting with code %d', retval);
-      LOG.end();
-      // Allow 1 minute for the graceful flushing shutdown above, else exit ungracefully.
-      await sleepSeconds(60); 
+      LOG.debug('Waiting 10s for log to flush (sic)...');
+      await sleepSeconds(10);
       exit(retval);
     } catch (e) {
-      // Winston's file transport silently swallows calls in quick succession, so concatenate.
       LOG.error('Error in main loop:\n%s', e.stack || e);
     }
 
