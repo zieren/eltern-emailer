@@ -678,7 +678,7 @@ function createTestEmails(numEmails) {
 /** Centralizes setting of common email options. */
 function buildEmail(fromName, subject, options) {
   return {...{
-    from: '"' + fromName.replace(/["\n]/g, '') + ' (EE)" <' + CONFIG.options.emailFrom + '>',
+    from: '"EE ' + fromName.replace(/["\n]/g, '') + '" <' + CONFIG.options.emailFrom + '>',
     to: CONFIG.options.emailTo,
     subject: subject
   }, ...options};
@@ -692,27 +692,28 @@ async function sendEmails() {
     return;
   }
   const transport = nodemailer.createTransport(CONFIG.smtp);
-  let first = true;
-  let carryover = []; // Collects messages to retry next time.
-  for (const e of inbound) {
+  let errors = [];
+  for (let i = 0; i < inbound.length; ++i) {
+    const e = inbound[i];
     if (CONFIG.options.mute) {
       LOG.info('Not sending email "%s" to %s', e.email.subject, e.email.to);
       await e.ok();
       continue;
     }
     // Throttle outgoing emails.
-    if (!first) {
+    if (i > 0) {
       LOG.info('Waiting %d seconds between messages', CONFIG.options.smtpWaitSeconds);
       await sleepSeconds(CONFIG.options.smtpWaitSeconds);
     }
-    first = false;
     LOG.info('Sending email "%s" to %s', e.email.subject, e.email.to);
     // Wait for the callback to run.
     const ok = await new Promise((resolve) => {
       transport.sendMail(e.email, (error, info) => {
         if (error) {
           LOG.error('Failed to send email: %s', error);
-          carryover.push(e);
+          if (!e.ignoreFailure) { // prevent infinite loop
+            errors.push(JSON.stringify(error, null, 1));
+          }
           resolve(false);
         } else {
           LOG.debug('Email sent (%s)', info.response);
@@ -723,14 +724,25 @@ async function sendEmails() {
     if (ok) {
       await e.ok();
     }
+    // Do we need an extra item for an error message?
+    if (i + 1 === inbound.length && errors.length) {
+      LOG.error('%d out of %d email(s) could not be sent, will retry in next iteration',
+          errors.length, inbound.length);
+      // We send an email to report an error sending email. The hope is that the error is transient.
+      inbound.push({
+        email: buildEmail('Fehlerteufel', 'Emailversand fehlgeschlagen', {
+            text: `${errors.length} von ${inbound.length} Email(s) konnte(n) nicht gesendet `
+            + `werden.\n\nFehler:\n${errors.join(',\n')}\n\nWeitere Details im Logfile.`,}),
+        ok: () => {},
+        ignoreFailure: true
+      });
+      errors = [];
+    }
   }
-  if (carryover.length) {
-    LOG.error(
-        '%d out of %d email(s) could not be sent, will retry', carryover.length, inbound.length);
-    // TODO: Create error email here.
-    // carryover.push(createErrorEmail('blah...'));
-  }
-  inbound = carryover; // clears inbound, or else requeues emails for retry
+
+  // Any message whose ok() handler didn't run was not added to our state and will simply be
+  // recreated in the next iteration.
+  inbound = [];
 }
 
 // ---------- Incoming email ----------
@@ -974,8 +986,13 @@ async function sendMessagesToTeachers(page) {
         }
       }
     } catch (e) {
-      // TODO: Report this back, i.e. email the error to the user.
       LOG.error('Failed to send message to teacher %d: %s', msg.teacherId, e);
+      inbound.push({
+        email: buildEmail('Fehlerteufel', 'Nachrichtenversand fehlgeschlagen', {
+            text: `Nachricht an Lehrer ${msg.teacherId} konnte nicht gesendet werden.\n\n`
+            + `Fehler:\n${JSON.stringify(e)}\n\nWeitere Details im Logfile.`,}),
+        ok: () => {}
+      });
     }
   }
 }
