@@ -55,10 +55,10 @@ const EMPTY_STATE = {
   threads: {}, 
   announcements: {},
   inquiries: {}, 
+  events: {}, // key: event description (needed when event is *removed*); value: timestamp
   hashes: {
     subs: '',
-    notices: {},
-    events: {} // key: hash; value: timestamp
+    notices: {}
   }};
 
 const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
@@ -575,33 +575,33 @@ async function readEventsInternal(page) {
       // Remove year because it's obvious, and use non-breaking hyphen to keep date and time on a
       // single line for better readability.
       const compactDateTime = (s) => s.replace(/( |20\d\d)/g, '').replace(/-/g, '&#8209;');
-      const descriptionHTML = 
+      const html = 
           '<td>' + compactDateTime(td.textContent)
           + '</td><td>&nbsp;' + compactDateTime(td.nextSibling.textContent)
           + '</td><td>' + td.nextSibling.nextSibling.textContent + '</td>';
       return {
         ts: ts, 
-        descriptionHTML: descriptionHTML,
+        html: html
       };
-      }));
+  }));
   // Handle parsing failures here because we don't have the logger in the page context above.
   events.filter(e => !e.ts).forEach(e => {
     e.ts = NOW; // Assume the event is imminent, just to be safe.
     // We only have the HTML here, but this case should be very rare.
-    LOG.error('Failed to parse date: "%s"', e.descriptionHTML);
+    LOG.error('Failed to parse date: "%s"', e.html);
   });
-  return events.map(e => { return {...e, hash: md5(e.descriptionHTML)};});
+  return events;
 }
 
-async function readEvents(page, previousHashes) {
+async function readEvents(page, previousEvents) {
   // An event is considered expired on the next day. We store events with a time of day of 0:00:00,
   // so we compute the timestamp for 0:00:00 today and prune events before then.
   const todayZeroDate = new Date(NOW);
   todayZeroDate.setHours(0, 0, 0, 0);
   const todayZeroTs = todayZeroDate.getTime();
-  Object.entries(previousHashes)
+  Object.entries(previousEvents)
       .filter(([_, ts]) => ts < todayZeroTs)
-      .forEach(([hash, _]) => delete previousHashes[hash])
+      .forEach(([html, _]) => delete previousEvents[html])
 
   // Read all exams and events.
   await page.goto(CONFIG.elternportal.url + '/service/termine/liste/schulaufgaben');
@@ -615,7 +615,7 @@ async function readEvents(page, previousHashes) {
   const lookaheadTs = lookaheadDate.getTime();
   const upcomingEvents = 
       events.filter(e => e.ts >= todayZeroTs && e.ts <= lookaheadTs).sort((a, b) => a.ts - b.ts);
-  const numNewEvents = upcomingEvents.filter(e => !(e.hash in previousHashes)).length;
+  const numNewEvents = upcomingEvents.filter(e => !(e.html in previousEvents)).length;
 
   LOG.info('New upcoming events: %d', numNewEvents);
 
@@ -632,20 +632,22 @@ async function readEvents(page, previousHashes) {
       + '</head><body><h2>Termine in den n&auml;chsten ' + CONFIG.options.eventLookaheadDays
       + ' Tagen</h2><table>';
   upcomingEvents.forEach(e => emailHTML +=  
-      (e.hash in previousHashes ? '<tr><td>' : '<tr class="new"><td>*') + '</td>' 
-      + e.descriptionHTML + '</tr>');
+      (e.html in previousEvents ? '<tr><td>' : '<tr class="new"><td>*') + '</td>' 
+      + e.html + '</tr>');
   emailHTML += '</table></body></html>';
   const doStudent = !!CONFIG.options.emailToStudent;
   let emailsLeft = doStudent ? 2 : 1;
   inbound.push({
     email: buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', {html: emailHTML}),
-    ok: () => { if (--emailsLeft) upcomingEvents.forEach(e => previousHashes[e.hash] = e.ts); }
+    // Mark event as "previous" (i.e. announced) when no more emails are left to send.
+    ok: () => { if (!--emailsLeft) upcomingEvents.forEach(e => previousEvents[e.html] = e.ts); }
   });
   if (doStudent) {
     inbound.push({
       email: buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', 
                  {html: emailHTML, to: CONFIG.options.emailToStudent}),
-      ok: () => { if (--emailsLeft) upcomingEvents.forEach(e => previousHashes[e.hash] = e.ts); }
+      // Same as ok() above.
+      ok: () => { if (!--emailsLeft) upcomingEvents.forEach(e => previousEvents[e.html] = e.ts); }
     });
   }
   LOG.info('%d upcoming event(s), of which %d new', upcomingEvents.length, numNewEvents);
@@ -1091,7 +1093,7 @@ async function main() {
     await readNoticeBoard(page, state.hashes);
 
     // Section "Schulaufgaben / Weitere Termine"
-    await readEvents(page, state.hashes.events);
+    await readEvents(page, state.events);
 
     // Send emails to user and possibly update state.
     if (CONFIG.options.test) {
