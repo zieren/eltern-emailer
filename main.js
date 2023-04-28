@@ -63,6 +63,13 @@ const EMPTY_STATE = {
 
 const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
 
+// Status of events and their (partial) HTML representation.
+const STATUS_TO_HTML = {
+  '-1': '<tr class="removed"><td>--', // removed (a rare but relevant case)
+  '0': '<tr><td>',  // previously notified
+  '1': '<tr class="new"><td>*', // added
+};
+
 /**
  * List of already processed (i.e. emailed) items. Contains the following keys:
  * - 'announcements': Announcements in "Aktuelles".
@@ -595,11 +602,13 @@ async function readEventsInternal(page) {
 
 async function readEvents(page, previousEvents) {
   // An event is considered expired on the next day. We store events with a time of day of 0:00:00,
-  // so we compute the timestamp for 0:00:00 today and prune events before then.
+  // so we compute the timestamp for 0:00:00 today and prune events before then. Note that the event
+  // HTML also contains the date, so using it as a key is sufficient and we can ignore the
+  // timestamp.
   const todayZeroDate = new Date(NOW);
   todayZeroDate.setHours(0, 0, 0, 0);
   const todayZeroTs = todayZeroDate.getTime();
-  Object.entries(previousEvents)
+  Object.entries(previousEvents) // yields array of [html, ts] tuples
       .filter(([_, ts]) => ts < todayZeroTs)
       .forEach(([html, _]) => delete previousEvents[html])
 
@@ -613,14 +622,28 @@ async function readEvents(page, previousEvents) {
   let lookaheadDate = new Date(todayZeroDate);
   lookaheadDate.setDate(lookaheadDate.getDate() + CONFIG.options.eventLookaheadDays);
   const lookaheadTs = lookaheadDate.getTime();
-  const upcomingEvents = 
-      events.filter(e => e.ts >= todayZeroTs && e.ts <= lookaheadTs).sort((a, b) => a.ts - b.ts);
-  const numNewEvents = upcomingEvents.filter(e => !(e.html in previousEvents)).length;
+  let upcomingEvents = events
+      .filter(e => e.ts >= todayZeroTs && e.ts <= lookaheadTs)
+      // See STATUS_TO_HTML for status codes.
+      .map(e => { return {...e, status: e.html in previousEvents ? 0 : 1 }; });
+  const numNewEvents = upcomingEvents.filter(e => e.status == 1).length;
+  
+  // Find removed events. previousEvents has been pruned above, so anything it contains that is no
+  // longer upcoming was removed.
+  const upcomingEventsHtml = upcomingEvents.map(e => e.html);
+  const removedEvents = Object.entries(previousEvents) // yields array of [html, ts] tuples
+      .filter(([html, _]) => !upcomingEventsHtml.includes(html))
+      .map(([html, ts]) => { return { html: html, ts: ts, status: -1 /* means: removed */}; });
+  const numRemovedEvents = Object.keys(removedEvents).length;
 
-  LOG.info('New upcoming events: %d', numNewEvents);
+  // Join the two and sort them by timestamp.
+  upcomingEvents = upcomingEvents.concat(removedEvents).sort((a, b) => a.ts - b.ts);
 
-  // Create emails.
-  if (!numNewEvents) {
+  LOG.info(`${upcomingEvents.length} upcoming event(s), `
+      + `of which ${numNewEvents} new and ${numRemovedEvents} removed`);
+
+      // Create emails.
+  if (!(numNewEvents + numRemovedEvents)) {
     return;
   }
   let emailHTML = '<!DOCTYPE html><html><head><title>Bevorstehende Termine</title>'
@@ -628,29 +651,36 @@ async function readEvents(page, previousEvents) {
       + 'table { border-collapse: collapse; } '
       + 'tr { border-bottom: 1pt solid; } '
       + 'tr.new { font-weight: bold; } '
+      + 'tr.removed { text-decoration: line-through; } '
       + '</style>'
       + '</head><body><h2>Termine in den n&auml;chsten ' + CONFIG.options.eventLookaheadDays
       + ' Tagen</h2><table>';
-  upcomingEvents.forEach(e => emailHTML +=  
-      (e.html in previousEvents ? '<tr><td>' : '<tr class="new"><td>*') + '</td>' 
-      + e.html + '</tr>');
+  upcomingEvents.forEach(e => emailHTML += STATUS_TO_HTML[e.status] + '</td>' + e.html + '</tr>');
   emailHTML += '</table></body></html>';
   const doStudent = !!CONFIG.options.emailToStudent;
   let emailsLeft = doStudent ? 2 : 1;
+
+  const okHandler = function() {
+    // Update state of previous (announced) events when all emails are sent.
+    if (!--emailsLeft) upcomingEvents.forEach(e => {
+      if (e.status == 1) {
+        previousEvents[e.html] = e.ts; // new event -> no longer new next time
+      } else if (e.status == -1) {
+        delete previousEvents[e.html]; // removed event -> no longer included next time
+      } // else: status 0 means the event exists both in the portal and in previousEvents -> no-op
+    })};
+
   inbound.push({
     email: buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', {html: emailHTML}),
-    // Mark event as "previous" (i.e. announced) when no more emails are left to send.
-    ok: () => { if (!--emailsLeft) upcomingEvents.forEach(e => previousEvents[e.html] = e.ts); }
+    ok: () => okHandler()
   });
   if (doStudent) {
     inbound.push({
       email: buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', 
                  {html: emailHTML, to: CONFIG.options.emailToStudent}),
-      // Same as ok() above.
-      ok: () => { if (!--emailsLeft) upcomingEvents.forEach(e => previousEvents[e.html] = e.ts); }
+      ok: () => okHandler()
     });
   }
-  LOG.info('%d upcoming event(s), of which %d new', upcomingEvents.length, numNewEvents);
 }
 
 // ---------- General email functions ----------
