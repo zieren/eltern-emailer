@@ -887,13 +887,23 @@ async function processNewEmail() {
     }
 
     // Prevent accidental impersonation by allowing only known senders in the From:.
-    if (!parsedMessage.from || !parsedMessage.from.value.length) {
-      LOG.warn('Rejected incoming email without From:');
-      continue;
+    let rejectedFrom = null;
+    if (!parsedMessage.from || !parsedMessage.from.value.length) { // never allowed
+      rejectedFrom = '';
+    } else if (!CONFIG.options.incomingEmail.allowForwardingFrom.includes( // maybe not allowed
+        // Assume just one element in the From: header, for simplicity.
+        parsedMessage.from.value[0].address.toLowerCase())) { 
+      rejectedFrom = parsedMessage.from.text;
     }
-    if (!CONFIG.options.incomingEmail.allowForwardingFrom.includes(
-        parsedMessage.from.value[0].address.toLowerCase())) {
-      LOG.warn(`Rejected incoming email from "${parsedMessage.from.text}"`);
+    if (rejectedFrom !== null) {
+      LOG.warn(`Rejecting incoming email from "${rejectedFrom}"`);
+      INBOUND.push({
+        email: buildEmail('Fehlerteufel', 'Nachricht von fremdem Absender ignoriert', {
+            text: `Nachricht von "${rejectedFrom}" an ` +
+                  `${CONFIG.options.incomingEmail.forwardingAddress} wurde ignoriert.\n\n` +
+                  'ACHTUNG: Diese Adresse sollte nicht veröffentlicht werden!',}),
+        ok: () => {}
+      });
       continue;
     }
 
