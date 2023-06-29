@@ -88,9 +88,9 @@ const BACKOFF_TRIGGER_SECONDS = 60 * 60; // 1h
 /** Maximum time to wait in exponential backoff. */
 const MAX_RETRY_WAIT_SECONDS = 60 * 60; // 1h
 /** Retry wait time for the last error. */
-let retryWaitSeconds = DEFAULT_RETRY_WAIT_SECONDS;
+let RETRY_WAIT_SECONDS = DEFAULT_RETRY_WAIT_SECONDS;
 /** Timestamp of the last error. */
-let lastFailureEpochMillis = 0;
+let LAST_FAILURE_EPOCH_MILLIS = 0;
 
 // ---------- Shared state ----------
 
@@ -99,7 +99,7 @@ let NOW = null;
 /** Initialized in main() after parsing CLI flags. */
 let CONFIG = {}, LOG = null;
 /** The IMAP client. */
-let imapFlow = null;
+let IMAP_CLIENT = null;
 /** Synchronization between IMAP event listener and main loop. */
 let awake = () => {}; // Event handler may fire before the main loop builds the wait Promise.
 /** 
@@ -112,14 +112,14 @@ let awake = () => {}; // Event handler may fire before the main loop builds the 
  * anyway. On the upside the IMAP flag will persist across reinstalls or deletion of the status
  * file.
  */
-let outbound = [];
+let OUTBOUND = [];
 /**
  * Inbound messages are intended for the user(s). They are received in the portal in a crawl
  * iteration (i.e. synchronously) and emailed to the user(s) via SMTP.
  */
-let inbound = [];
+let INBOUND = [];
 /** Forward IMAP logging to our own logger. */
-const imapLogger = {
+const IMAP_LOGGER = {
   debug: (o) => {}, // This is too noisy.
   info: (o) => LOG.info('IMAP: %s', JSON.stringify(o)),
   // Some errors don't trigger the error handler, but only show up as an error or even just warning
@@ -313,7 +313,7 @@ function buildEmailsForAnnouncements(page, announcements, processedAnnouncements
             processedAnnouncements[a.id] = 1;
           }
         };
-      }).forEach(e => inbound.push(e));
+      }).forEach(e => INBOUND.push(e));
 }
 
 // ---------- Threads ----------
@@ -454,7 +454,7 @@ function buildEmailsForThreads(teachers, processedThreads) {
                     .replace('@', '+' + teacher.id + '@');
                 + '>';
           }
-          inbound.push({
+          INBOUND.push({
             // We don't forge the date here because time of day is not available.
             email: email,
             ok: () => { processedThreads[thread.id][i] = 1; }
@@ -501,7 +501,7 @@ function buildEmailsForInquiries(inquiries, processedInquiries) {
       if (j > 0) {
         email.references = [buildMessageId('inquiry-' + i + '-' + (j - 1))];
       }
-      inbound.push({
+      INBOUND.push({
         // We don't forge the date here because time of day is not available.
         email: email,
         ok: () => { processedInquiries[i] = j + 1; }
@@ -528,13 +528,13 @@ async function readSubstitutions(page, previousHashes) {
       + '<body>' + originalHTML + '</body></html>';
   let emailsLeft = (doParent && doStudent) ? 2 : 1;
   if (doParent) {
-    inbound.push({
+    INBOUND.push({
       email: buildEmail('Vertretungsplan', 'Vertretungsplan', {html: modifiedHTML}),
       ok: () => { if (!--emailsLeft) previousHashes.subs = hash; }
     });
   }
   if (doStudent) {
-    inbound.push({
+    INBOUND.push({
       email: buildEmail('Vertretungsplan', 'Vertretungsplan', 
                  {html: modifiedHTML, to: CONFIG.options.emailToStudent}),
       ok: () => { if (!--emailsLeft) previousHashes.subs = hash; }
@@ -558,7 +558,7 @@ async function readNoticeBoard(page, previousHashes) {
     }
     LOG.info('Found notice board message');
     newHashes[hash] = false;
-    inbound.push({
+    INBOUND.push({
       email: buildEmail('Schwarzes Brett', 'Schwarzes Brett', {html: gridItemHTML}),
       ok: () => { newHashes[hash] = true; }
     });
@@ -670,12 +670,12 @@ async function readEvents(page, previousEvents) {
       } // else: status 0 means the event exists both in the portal and in previousEvents -> no-op
     })};
 
-  inbound.push({
+  INBOUND.push({
     email: buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', {html: emailHTML}),
     ok: () => okHandler()
   });
   if (doStudent) {
-    inbound.push({
+    INBOUND.push({
       email: buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', 
                  {html: emailHTML, to: CONFIG.options.emailToStudent}),
       ok: () => okHandler()
@@ -719,14 +719,14 @@ function buildEmail(fromName, subject, options) {
 // ---------- Email sending ----------
 
 async function sendEmails() {
-  LOG.info('Sending %d email(s)', inbound.length);
-  if (!inbound.length) {
+  LOG.info('Sending %d email(s)', INBOUND.length);
+  if (!INBOUND.length) {
     return;
   }
   const transport = nodemailer.createTransport(CONFIG.smtp);
   let errors = [];
-  for (let i = 0; i < inbound.length; ++i) {
-    const e = inbound[i];
+  for (let i = 0; i < INBOUND.length; ++i) {
+    const e = INBOUND[i];
     if (CONFIG.options.mute) {
       LOG.info('Not sending email "%s" to %s', e.email.subject, e.email.to);
       await e.ok();
@@ -757,13 +757,13 @@ async function sendEmails() {
       await e.ok();
     }
     // Do we need an extra item for an error message?
-    if (i + 1 === inbound.length && errors.length) {
+    if (i + 1 === INBOUND.length && errors.length) {
       LOG.error('%d out of %d email(s) could not be sent, will retry in next iteration',
-          errors.length, inbound.length);
+          errors.length, INBOUND.length);
       // We send an email to report an error sending email. The hope is that the error is transient.
-      inbound.push({
+      INBOUND.push({
         email: buildEmail('Fehlerteufel', 'Emailversand fehlgeschlagen', {
-            text: `${errors.length} von ${inbound.length} Email(s) konnte(n) nicht gesendet `
+            text: `${errors.length} von ${INBOUND.length} Email(s) konnte(n) nicht gesendet `
             + `werden.\n\nFehler:\n${errors.join(',\n')}\n\nWeitere Details im Logfile.`,}),
         ok: () => {},
         ignoreFailure: true
@@ -774,16 +774,16 @@ async function sendEmails() {
 
   // Any message whose ok() handler didn't run was not added to our state and will simply be
   // recreated in the next iteration.
-  inbound = [];
+  INBOUND = [];
 }
 
 // ---------- Incoming email ----------
 
 /** Create the ImapFlow client, configure its event handlers and open the mailbox. */
-async function createImapFlow() {
-  imapFlow = new ImapFlow(CONFIG.imap);
+async function createImapClient() {
+  IMAP_CLIENT = new ImapFlow(CONFIG.imap);
   // Check for new messages on open, and whenever the # of existing messages changes.
-  imapFlow
+  IMAP_CLIENT
       .on('mailboxOpen', async () => {
         // This will run before the 'exists' handler below.
         LOG.debug('Mailbox opened, checking for new messages...');
@@ -807,10 +807,10 @@ async function createImapFlow() {
         // currently waiting.
         awake();
       });
-  await imapFlow.connect();
-  await imapFlow.mailboxOpen('INBOX');
+  await IMAP_CLIENT.connect();
+  await IMAP_CLIENT.mailboxOpen('INBOX');
   LOG.info('Listening on IMAP mailbox')
-  return imapFlow;
+  return IMAP_CLIENT;
 }
 
 /** 
@@ -818,9 +818,9 @@ async function createImapFlow() {
  * original error on failure.
  */
 async function checkImapConnection() {
-  if (imapFlow) {
+  if (IMAP_CLIENT) {
     try {
-      await imapFlow.noop(); // runs on the server
+      await IMAP_CLIENT.noop(); // runs on the server
       LOG.debug('IMAP connection OK');
     } catch (e) {
       LOG.error('IMAP connection down'); // The outer (retry) loop will log the error details.
@@ -833,23 +833,23 @@ async function checkImapConnection() {
  * Try to logout() gracefully. In some conditions (e.g. when an operation is in progress) this won't
  * work and we can only close(). 
  */
-async function disposeImapFlow() {
-  if (imapFlow) {
+async function disposeImapClient() {
+  if (IMAP_CLIENT) {
     try {
-      await imapFlow.logout();
+      await IMAP_CLIENT.logout();
       LOG.debug('Logged out of IMAP server');
     } catch (e) {
       // ignored
       LOG.debug('Failed to log out of IMAP server');
     }
     try {
-      imapFlow.close();
+      IMAP_CLIENT.close();
       LOG.debug('Closed IMAP connection');
     } catch (e) {
       // ignored
       LOG.debug('Failed to close IMAP connection');
     }
-    imapFlow = null;
+    IMAP_CLIENT = null;
   }
 }
 
@@ -860,7 +860,7 @@ async function processNewEmail() {
   const ignoredMessages = {};
   let numNewMessages = 0;
   
-  for await (let message of imapFlow.fetch({answered: false}, { source: true })) {
+  for await (let message of IMAP_CLIENT.fetch({answered: false}, { source: true })) {
     ++numNewMessages;
     // This is removed if we found something to process, i.e. registered a success handler that
     // will mark the message processed.
@@ -926,7 +926,7 @@ async function processNewEmail() {
         isReply ? 'reply to' : 'email for', teacherId, 
         recipient.name ? ' (' + recipient.name + ')' : '',
         subject, text.length, message.seq);
-      outbound.push({
+      OUTBOUND.push({
         teacherId: teacherId,
         replyThreadId: isReply ? replyThreadId : undefined,
         subject: isReply ? undefined : subject,
@@ -939,7 +939,7 @@ async function processNewEmail() {
 
   if (Object.keys(ignoredMessages).length) {
     const seqs = Object.keys(ignoredMessages).join();
-    await imapFlow.messageFlagsAdd({seq: seqs}, ['\\Answered']);
+    await IMAP_CLIENT.messageFlagsAdd({seq: seqs}, ['\\Answered']);
     LOG.debug('Marked ignored emails: %s', seqs);
   }
 
@@ -951,14 +951,14 @@ async function processNewEmail() {
 }
 
 async function markEmailDone(seq) {
-  await imapFlow.messageFlagsAdd({ seq: seq }, ['\\Answered']);
+  await IMAP_CLIENT.messageFlagsAdd({ seq: seq }, ['\\Answered']);
   LOG.debug('Marked processed email: %d', seq);
 }
 
 // ---------- Outgoing messages ----------
 
 async function sendMessagesToTeachers(page) {
-  LOG.info('Sending %d message(s) to teachers', outbound.length);
+  LOG.info('Sending %d message(s) to teachers', OUTBOUND.length);
   // Sidenote: Curiously navigation will always succeed, even for nonexistent teacher IDs. What's
   // more, we can actually send messages that we can then retrieve by navigating to the URL
   // directly. This greatly simplifies testing :-)
@@ -969,8 +969,8 @@ async function sendMessagesToTeachers(page) {
   // flooding a teacher with messages. This means that each message must be removed from the global
   // "outbound" variable after processing is complete. To guarantee this we make a local copy and
   // clear the global variable right away.
-  const outboundTmp = outbound;
-  outbound = [];
+  const outboundTmp = OUTBOUND;
+  OUTBOUND = [];
 
   for (const msg of outboundTmp) {
     // In case of multiple messages we prefix them with "[n/N] ". Assuming that n and N have at
@@ -1030,7 +1030,7 @@ async function sendMessagesToTeachers(page) {
       }
     } catch (e) {
       LOG.error('Failed to send message to teacher %d: %s', msg.teacherId, e);
-      inbound.push({
+      INBOUND.push({
         email: buildEmail('Fehlerteufel', 'Nachrichtenversand fehlgeschlagen', {
             text: `Nachricht an Lehrer ${msg.teacherId} konnte nicht gesendet werden.\n\n`
             + `Fehler:\n${JSON.stringify(e)}\n\nWeitere Details im Logfile.`,}),
@@ -1053,7 +1053,7 @@ async function main() {
   const {_, flags} = parser.parse(process.argv.slice(2));
 
   CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
-  CONFIG.imap.logger = imapLogger; // standing orders
+  CONFIG.imap.logger = IMAP_LOGGER; // standing orders
   CONFIG.imap.maxIdleTime ||= 60 * 1000; // 60s default
   LOG = createLogger();
   LOG.info(TITLE);
@@ -1071,7 +1071,7 @@ async function main() {
   // Start IMAP listener, if enabled.
   if (CONFIG.options.incomingEmail.enabled) {
     try {
-      imapFlow = await createImapFlow();
+      IMAP_CLIENT = await createImapClient();
     } catch (e) {
       // Error details were already logged by our custom logger.
       // Check for some permanent errors upon which we should quit. This list may need to be
@@ -1139,7 +1139,7 @@ async function main() {
     // Send emails to user and possibly update state.
     if (CONFIG.options.test) {
       // Replace actual emails and don't update state.
-      inbound = createTestEmails(inbound.length);
+      INBOUND = createTestEmails(INBOUND.length);
       await sendEmails();
     } else {
       await sendEmails();
@@ -1152,8 +1152,8 @@ async function main() {
 
     if (CONFIG.options.once) {
       LOG.info('Terminating due to --once flag/option');
-      if (imapFlow) {
-        await imapFlow.logout();
+      if (IMAP_CLIENT) {
+        await IMAP_CLIENT.logout();
       }
       return 0;
     }
@@ -1174,7 +1174,7 @@ async function main() {
       // Only now can the IMAP receive event handler awake us. It could already have populated
       // "outbound" and notified the previous Promise while the main loop was busy, so check for 
       // that.
-      if (outbound.length) {
+      if (OUTBOUND.length) {
         resolve();
       } else {
         LOG.debug('Waiting %d minutes until next check', CONFIG.options.checkIntervalMinutes);
@@ -1209,19 +1209,19 @@ async function main() {
     // to teachers via persistent IMAP message flags, but do not take special precautions against
     // duplicate emails to parents. The latter case seems rather unlikely and much less serious.
 
-    await disposeImapFlow();
+    await disposeImapClient();
 
     const nowEpochMillis = Date.now();
-    const secondsSinceLastFailure = (nowEpochMillis - lastFailureEpochMillis) / 1000;
+    const secondsSinceLastFailure = (nowEpochMillis - LAST_FAILURE_EPOCH_MILLIS) / 1000;
     LOG.debug('Last failure was %d seconds ago', secondsSinceLastFailure);
     if (secondsSinceLastFailure > BACKOFF_TRIGGER_SECONDS) { // reset wait time
-      retryWaitSeconds = DEFAULT_RETRY_WAIT_SECONDS;
+      RETRY_WAIT_SECONDS = DEFAULT_RETRY_WAIT_SECONDS;
     } else { // exponential backoff
-      retryWaitSeconds =  Math.min(retryWaitSeconds * 2, MAX_RETRY_WAIT_SECONDS); 
+      RETRY_WAIT_SECONDS =  Math.min(RETRY_WAIT_SECONDS * 2, MAX_RETRY_WAIT_SECONDS); 
     }
-    lastFailureEpochMillis = nowEpochMillis;
-    LOG.info('Waiting %d seconds before retry', retryWaitSeconds);
-    await sleepSeconds(retryWaitSeconds);
+    LAST_FAILURE_EPOCH_MILLIS = nowEpochMillis;
+    LOG.info('Waiting %d seconds before retry', RETRY_WAIT_SECONDS);
+    await sleepSeconds(RETRY_WAIT_SECONDS);
     LOG.debug('Waiting completed');
   }
 })();
