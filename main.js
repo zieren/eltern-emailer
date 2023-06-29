@@ -1,4 +1,4 @@
-const TITLE = 'Eltern-Emailer 0.5.0 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.5.1 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
     + ' See https://zieren.de/software/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
@@ -160,10 +160,10 @@ function processFlags(flags) {
 }
 
 function createIncomingEmailRegExp() {
-  if (CONFIG.options.incomingEmailAddressForForwarding) {
-    CONFIG.options.incomingEmailRegEx =
+  if (CONFIG.options.incomingEmail.forwardingAddress) {
+    CONFIG.options.incomingEmail.regEx =
         '(?:^|<)' 
-        + CONFIG.options.incomingEmailAddressForForwarding
+        + CONFIG.options.incomingEmail.forwardingAddress
             .replace(/\./g, '\\.')
             .replace('@', '(?:\\+(\\d+))@') // tag is mandatory
         + '(?:$|>)';
@@ -446,11 +446,11 @@ function buildEmailsForThreads(teachers, processedThreads) {
           if (i > 0) {
             email.references = [buildMessageId(messageIdBase + (i - 1))];
           }
-          if (CONFIG.options.incomingEmailAddressForForwarding) {
+          if (CONFIG.options.incomingEmail.forwardingAddress) {
             // We always put the teacher ID here, so the user can also reply to their own messages.
             email.replyTo = 
                 '"' + thread.teacherName.replace(/"/g, '') + '" <'
-                + CONFIG.options.incomingEmailAddressForForwarding
+                + CONFIG.options.incomingEmail.forwardingAddress
                     .replace('@', '+' + teacher.id + '@');
                 + '>';
           }
@@ -866,7 +866,7 @@ async function processNewEmail() {
     // will mark the message processed.
     ignoredMessages[message.seq] = 1; 
     // If no incoming email address is set up, there is nothing to do except mark new messages.
-    if (!CONFIG.options.incomingEmailRegEx) {
+    if (!CONFIG.options.incomingEmail.regEx) {
       continue;
     }
 
@@ -880,10 +880,21 @@ async function processNewEmail() {
         // The user may have set up forwarding from some easy-to-guess address (e.g. the one
         // initially registered with the portal), exposing the address to spam or pranks. To be safe
         // we check for the secret, hard-to-guess address.
-        .filter(value => value.address && value.address.match(CONFIG.options.incomingEmailRegEx));
+        .filter(value => value.address && value.address.match(CONFIG.options.incomingEmail.regEx));
 
     if (!recipients.length) {
       continue; // The message isn't intended for us.
+    }
+
+    // Prevent accidental impersonation by allowing only known senders in the From:.
+    if (!parsedMessage.from || !parsedMessage.from.value.length) {
+      LOG.warn('Rejected incoming email without From:');
+      continue;
+    }
+    if (!CONFIG.options.incomingEmail.allowForwardingFrom.includes(
+        parsedMessage.from.value[0].address.toLowerCase())) {
+      LOG.warn(`Rejected incoming email from "${parsedMessage.from.text}"`);
+      continue;
     }
 
     // For replies we get the teacher ID and thread ID from the In-Reply-To header, and we don't
@@ -895,7 +906,7 @@ async function processNewEmail() {
         : [0, -1, -1];
 
     for (const recipient of recipients) {
-      const teacherId = recipient.address.match(CONFIG.options.incomingEmailRegEx)[1];
+      const teacherId = recipient.address.match(CONFIG.options.incomingEmail.regEx)[1];
       if (!teacherId) { // This still allows testing with "0" because it's a string.
         LOG.warn('Failed to parse recipient "%s"', recipient.address);
         continue; // Should never happen because we filtered recipients to match the RegEx above.
@@ -1058,7 +1069,7 @@ async function main() {
   createIncomingEmailRegExp();
 
   // Start IMAP listener, if enabled.
-  if (CONFIG.options.incomingEmailEnabled) {
+  if (CONFIG.options.incomingEmail.enabled) {
     try {
       imapFlow = await createImapFlow();
     } catch (e) {

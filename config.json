@@ -26,8 +26,11 @@
     "emailFrom": "RETURN EMAIL ADDRESS",
     "emailTo": "PARENT(S) EMAIL ADDRESS",
     "emailToStudent": "STUDENT EMAIL ADDRESS (OPTIONAL; EMPTY TO DISABLE)",
-    "incomingEmailEnabled": true,
-    "incomingEmailAddressForForwarding": "IMAP EMAIL ADDRESS",
+    "incomingEmail": {
+      "enabled": true,
+      "forwardingAddress": "IMAP EMAIL ADDRESS",
+      "allowForwardingFrom": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."]
+    },
     "eventLookaheadDays": 7,
     "checkIntervalMinutes": 30,
     "smtpWaitSeconds": 5,
