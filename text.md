@@ -4,7 +4,7 @@ title: 'Eltern-Emailer'
 
 ## Resources
 
-* Download the latest version: [Eltern-Emailer 0.4.0](https://github.com/zieren/eltern-emailer/releases/tag/v0.4.0) (2023-02-24)
+* Download the [latest version](https://github.com/zieren/eltern-emailer/releases/latest)
 * [GitHub page](https://github.com/zieren/eltern-emailer) with [version history](https://github.com/zieren/eltern-emailer/releases) and [issue tracker](https://github.com/zieren/eltern-emailer/issues)
 
 ## Overview
