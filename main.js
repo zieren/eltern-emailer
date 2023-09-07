@@ -1112,7 +1112,7 @@ async function main() {
         Object.keys(state.announcements).length,
         Object.keys(state.threads).length,
         Object.keys(state.inquiries).length);
-    const browser = await puppeteer.launch();
+    const browser = await puppeteer.launch({headless: "new"}); // prevent deprecation warning
     const page = await browser.newPage();
 
     await login(page);
