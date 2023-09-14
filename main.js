@@ -229,7 +229,9 @@ async function login(page) {
     page.waitForNavigation(),
     page.click('#inputPassword ~ button')
   ]);
-  const success = (await page.$$eval('a[href*="einstellungen"]', (x) => x)).length > 0;
+  // When settings are present, we are logged in.
+  const success = 
+      (await page.$$eval('a[href*="einstellungen"]', (x) => x.length)) > 0;
   if (!success) {
     throw 'Login failed';
   }
