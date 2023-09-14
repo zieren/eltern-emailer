@@ -81,7 +81,6 @@ Schools use different feature subsets of the portal. If a feature is missing for
    ```
    npm install args-and-flags content-disposition imapflow mailparser md5 nodemailer puppeteer winston
    ```
-   This downloads 400+MB (because it includes a Chromium binary). You can continue with the next step in the meanwhile.
 1. Edit the file `config.json` to specify your login credentials, SMTP/IMAP servers etc. All uppercase parts need to be replaced. If you don't want to store credentials in a file you can pass them via commandline flags (see [Flags](#_flags)). See section [Configuration](#_configuration) below for a detailed description of all options.
 
    **WARNING**
