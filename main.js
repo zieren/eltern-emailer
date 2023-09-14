@@ -856,7 +856,7 @@ async function disposeImapClient() {
 /** This uses the "answered" flag, which is part of the IMAP standard, to mark messages done. */
 async function processNewEmail() {
   // Collect messages not intended for forwarding to teachers. These are marked processed to hide
-  // them in the next query. They only trigger a check. Key is IMAP sequence number, value is 1.
+  // them in the next query. They only trigger a crawl. Key is IMAP sequence number, value is 1.
   const ignoredMessages = {};
   let numNewMessages = 0;
   
@@ -883,10 +883,10 @@ async function processNewEmail() {
         .filter(value => value.address && value.address.match(CONFIG.options.incomingEmail.regEx));
 
     if (!recipients.length) {
-      continue; // The message isn't intended for us.
+      continue; // The message isn't intended for a teacher.
     }
 
-    // Prevent accidental impersonation by allowing only known senders in the From:.
+    // Prevent (likely accidental) impersonation by allowing only known senders in the From:.
     let rejectedFrom = null;
     if (!parsedMessage.from || !parsedMessage.from.value.length) { // never allowed
       rejectedFrom = '';
