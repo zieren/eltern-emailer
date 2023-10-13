@@ -4,6 +4,10 @@
     "user": "EMAIL ADDRESS FOR LOGIN",
     "pass": "PASSWORD"
   },
+  "schulmanager": {
+    "user": "EMAIL ADDRESS FOR LOGIN",
+    "pass": "PASSWORD"
+  },
   "smtp": {
     "host": "YOUR SMTP SERVER",
     "port": 465,

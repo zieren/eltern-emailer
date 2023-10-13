@@ -79,7 +79,7 @@ Schools use different feature subsets of the portal. If a feature is missing for
 1. Download the latest [release](https://github.com/zieren/eltern-emailer/releases) and unpack it to an installation directory of your choice.
 1. In that directory, run this command to install the required dependencies:
    ```
-   npm install args-and-flags content-disposition imapflow mailparser md5 nodemailer puppeteer winston
+   npm install args-and-flags content-disposition fs-extra imapflow mailparser md5 nodemailer puppeteer winston
    ```
 1. Edit the file `config.json` to specify your login credentials, SMTP/IMAP servers etc. All uppercase parts need to be replaced. If you don't want to store credentials in a file you can pass them via commandline flags (see [Flags](#_flags)). See section [Configuration](#_configuration) below for a detailed description of all options.
 

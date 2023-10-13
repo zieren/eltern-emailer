@@ -1,65 +1,65 @@
-const TITLE = 'Eltern-Emailer 0.6.1 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.7.0 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
     + ' See https://zieren.de/software/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
 const { exit } = require('process');
 const https = require('https');
-const fs = require('fs');
+const fs = require('fs-extra');
 const { ImapFlow } = require('imapflow');
 const md5 = require('md5');
 const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
 const { simpleParser } = require('mailparser');
-const winston = require('winston');
+
+// ---------- Shared state ----------
+
+const lg = require('./logging.js'); // provides global LOG (initialized below)
+
+// Browser instance is shared across eltern-portal.org and schulmanager-online.de.
+global.BROWSER = null;
+// Initialized in main() after parsing CLI flags.
+global.CONFIG = {};
+// Inbound messages are intended for the user(s). They are generated from crawling the portal(s) and
+// emailed to the user(s) via SMTP.
+global.INBOUND = [];
+
+// ---------- Something like encapsulation ----------
+
+// Maybe I should have used classes, but it seems that it doesn't really matter that much.
+const em = require('./email.js')
+const sm = require('./schulmanager.js');
 
 // ---------- Constants ----------
 
 const CLI_OPTIONS = {
   args: [],
   flags: [
-    {
-      name: 'config',
-      type: 'string',
-      default: 'config.json'
-    },
-    {
-      name: 'ep_password',
-      type: 'string'
-    },
-    {
-      name: 'smtp_password',
-      type: 'string'
-    },
-    {
-      name: 'imap_password',
-      type: 'string'
-    },
-    {
-      name: 'mute',
-      type: 'boolean'
-    },
-    {
-      name: 'once',
-      type: 'boolean'
-    },
-    {
-      name: 'test',
-      type: 'boolean'
-    }
+    { name: 'config', type: 'string', default: 'config.json' },
+    { name: 'ep_password', type: 'string' },
+    { name: 'smtp_password', type: 'string' },
+    { name: 'imap_password', type: 'string' },
+    { name: 'mute', type: 'boolean' },
+    { name: 'once', type: 'boolean' },
+    { name: 'test', type: 'boolean' }
   ]
 };
 
 const EMPTY_STATE = {
-  // Last successful run (epoch millis). Older data in the portal can be skipped for performance.
-  lastSuccessfulRun: 0,
-  threads: {}, 
-  announcements: {},
-  inquiries: {}, 
-  events: {}, // key: event description (needed when event is *removed*); value: timestamp
-  hashes: {
-    subs: '',
-    notices: {}
-  }};
+  ep: {
+    lastSuccessfulRun: 0, // Last successful run (epoch millis). Older data can be skipped.
+    threads: {},
+    announcements: {},
+    inquiries: {},
+    events: {}, // key: event description (needed when event is *removed*); value: timestamp
+    hashes: {
+      subs: '',
+      notices: {}
+    }
+  },
+  sm: {
+    letters: {} // key: "$id $subject", value: 1
+  }
+};
 
 const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
 
@@ -92,12 +92,8 @@ let RETRY_WAIT_SECONDS = DEFAULT_RETRY_WAIT_SECONDS;
 /** Timestamp of the last error. */
 let LAST_FAILURE_EPOCH_MILLIS = 0;
 
-// ---------- Shared state ----------
-
 /** The ~current time (epoch millis). Set at the start of each main loop iteration. */
 let NOW = null;
-/** Initialized in main() after parsing CLI flags. */
-let CONFIG = {}, LOG = null;
 /** The IMAP client. */
 let IMAP_CLIENT = null;
 /** Synchronization between IMAP event listener and main loop. */
@@ -113,11 +109,6 @@ let awake = () => {}; // Event handler may fire before the main loop builds the 
  * file.
  */
 let OUTBOUND = [];
-/**
- * Inbound messages are intended for the user(s). They are received in the portal in a crawl
- * iteration (i.e. synchronously) and emailed to the user(s) via SMTP.
- */
-let INBOUND = [];
 /** Forward IMAP logging to our own logger. */
 const IMAP_LOGGER = {
   debug: (o) => {}, // This is too noisy.
@@ -139,6 +130,7 @@ const IMAP_LOGGER = {
 function readState() {
   const state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) : {};
   setEmptyState(state, EMPTY_STATE);
+  LOG.debug('Read state');
   return state;
 }
 
@@ -170,28 +162,15 @@ function createIncomingEmailRegExp() {
   }
 }
 
-function createLogger() {
-  return winston.createLogger({
-    level: CONFIG.options.logLevel,
-    format: winston.format.combine(
-      winston.format.splat(),
-      winston.format.timestamp(),
-      winston.format.printf(({level, message, timestamp}) => {
-        return `${timestamp} ${level}: ${message}`;
-      })
-    ),
-    transports: [
-      new winston.transports.File({
-        filename: 'eltern-emailer.log',
-        maxsize: 10 << 20,
-        maxFiles: 2
-      }),
-      new winston.transports.Console()
-    ]
-  });
+// ---------- Utilities ----------
+
+function elternPortalConfigured() {
+  return CONFIG.elternportal && !CONFIG.elternportal.url.startsWith('https://SCHOOL.');
 }
 
-// ---------- Utilities ----------
+function schulmanagerConfigured() {
+  return CONFIG.schulmanager && CONFIG.schulmanager.user !== 'EMAIL ADDRESS FOR LOGIN';
+}
 
 function sleepSeconds(seconds) {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
@@ -221,23 +200,23 @@ async function downloadFile(file, options) {
 // ---------- Login ----------
 
 /** This function does the thing. The login thing. You know? */
-async function login(page) {
+async function loginElternPortal(page) {
   await page.goto(CONFIG.elternportal.url);
   await page.type('#inputEmail', CONFIG.elternportal.user);
   await page.type('#inputPassword', CONFIG.elternportal.pass);
-  await Promise.all([
+    await Promise.all([
     page.waitForNavigation(),
     page.click('#inputPassword ~ button')
   ]);
   // When settings are present, we are logged in.
-  const success = 
-      (await page.$$eval('a[href*="einstellungen"]', (x) => x.length)) > 0;
+  const success = await page.$$eval('a[href*="einstellungen"]', (a) => a.length) > 0;
   if (!success) {
-    throw 'Login failed';
+    throw 'Login Eltern-Portal failed';
   }
-  LOG.info('Login OK');
+  LOG.info('Login Eltern-Portal OK');
 }
 
+// TODO: Store this globally to avoid calling it multiple times?
 async function getPhpSessionIdAsCookie(page) {
   const cookies = await page.cookies();
   const id = cookies.filter(c => c.name === 'PHPSESSID');
@@ -257,14 +236,16 @@ async function readAnnouncements(page) {
     (nodes) => nodes.map(
       (n) => {
         // Transform the date to a format that Date can parse.
-        const d = n.firstChild.nextSibling.textContent
+        const d = n.firstChild.nextSibling.textContent // it's a text node
             .match(/(\d\d)\.(\d\d)\.(\d\d\d\d) +(\d\d:\d\d:\d\d)/);
         return {
           // Use the ID also used for reading confirmation, because it should be stable.
           id: n.attributes.onclick.textContent.match(/\(([0-9]+)\)/)[1],
-          body: n.parentElement.outerText.substring(n.outerText.length).trim(),
+          // Strip subject and date, which are in "n".
+          body: n.parentElement.innerText.substring(n.innerText.length).trim(),
           subject: n.firstChild.textContent,
           url: n.tagName === 'A' ? n.href : null,
+          // Date isn't serializable, so we need to use a string.
           dateString: d[3] + '-' + d[2] + '-' + d[1] + ' ' + d[4]
         };
       }));
@@ -293,7 +274,7 @@ function buildEmailsForAnnouncements(page, announcements, processedAnnouncements
       // the reception date instead), so it's the best we can do.
       .reverse()
       .map(a => {
-        const email = buildEmail('Aktuelles', a.subject, {
+        const email = em.buildEmail('Aktuelles', a.subject, {
           text: a.body,
           date: new Date(a.dateString)});
         if (a.content) {
@@ -364,8 +345,9 @@ async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
             url: a.href,
             teacherName: decodeURI(m[1]).replace(/_/g, ' '),
             subject: a.textContent,
-            // We add two days to the date to account for a) lacking time of day, and b) timezones.
-            // There is no need to cut it close, the performance gain would not outweigh complexity.
+            // We add two days to the date to account for a) lacking time of day, b) timezones, and
+            // c) clock skew. There is no need to cut it close, the performance gain would not
+            // outweigh complexity.
             latest: new Date(d[3], d[2] - 1, parseInt(d[1]) + 2).getTime()
           };
         })))
@@ -433,8 +415,8 @@ function buildEmailsForThreads(teachers, processedThreads) {
           // The thread ID seems to be globally unique. Including the teacher ID simplifies posting
           // replies, because the mail client will put this ID in the In-Reply-To header.
           const messageIdBase = 'thread-' + teacher.id + '-' + thread.id + '-';
-          const email = buildEmail(msg.author, thread.subject, {
-            messageId: buildMessageId(messageIdBase + i),
+          const email = em.buildEmail(msg.author, thread.subject, {
+            messageId: em.buildMessageId(messageIdBase + i),
             text: msg.body
           });
           if (msg.content) {
@@ -446,7 +428,7 @@ function buildEmailsForThreads(teachers, processedThreads) {
             ];
           }
           if (i > 0) {
-            email.references = [buildMessageId(messageIdBase + (i - 1))];
+            email.references = [em.buildMessageId(messageIdBase + (i - 1))];
           }
           if (CONFIG.options.incomingEmail.forwardingAddress) {
             // We always put the teacher ID here, so the user can also reply to their own messages.
@@ -493,15 +475,15 @@ function buildEmailsForInquiries(inquiries, processedInquiries) {
     }
     for (let j = processedInquiries[i]; j < inquiry.messages.length; ++j) {
       // AFAICT each thread has at most two messages.
-      const email = buildEmail(INQUIRY_AUTHOR[Math.min(j, 2)], inquiry.subject, {
+      const email = em.buildEmail(INQUIRY_AUTHOR[Math.min(j, 2)], inquiry.subject, {
         // TODO: Consider enriching this, see TODO for other messageId (#4).
-        messageId: buildMessageId('inquiry-' + i + '-' + j),
+        messageId: em.buildMessageId('inquiry-' + i + '-' + j),
         // TODO: ^^ What if these are cleared after the school year, and indexes start at 0 again?
         // Maybe include a hash of the subject, or the date, to avoid collisions.
         text: inquiry.messages[j]
       });
       if (j > 0) {
-        email.references = [buildMessageId('inquiry-' + i + '-' + (j - 1))];
+        email.references = [em.buildMessageId('inquiry-' + i + '-' + (j - 1))];
       }
       INBOUND.push({
         // We don't forge the date here because time of day is not available.
@@ -531,13 +513,13 @@ async function readSubstitutions(page, previousHashes) {
   let emailsLeft = (doParent && doStudent) ? 2 : 1;
   if (doParent) {
     INBOUND.push({
-      email: buildEmail('Vertretungsplan', 'Vertretungsplan', {html: modifiedHTML}),
+      email: em.buildEmail('Vertretungsplan', 'Vertretungsplan', {html: modifiedHTML}),
       ok: () => { if (!--emailsLeft) previousHashes.subs = hash; }
     });
   }
   if (doStudent) {
     INBOUND.push({
-      email: buildEmail('Vertretungsplan', 'Vertretungsplan', 
+      email: em.buildEmail('Vertretungsplan', 'Vertretungsplan', 
                  {html: modifiedHTML, to: CONFIG.options.emailToStudent}),
       ok: () => { if (!--emailsLeft) previousHashes.subs = hash; }
     });
@@ -561,7 +543,9 @@ async function readNoticeBoard(page, previousHashes) {
     LOG.info('Found notice board message');
     newHashes[hash] = false;
     INBOUND.push({
-      email: buildEmail('Schwarzes Brett', 'Schwarzes Brett', {html: gridItemHTML}),
+      email: em.buildEmail('Schwarzes Brett', 'Schwarzes Brett', {
+        html: `<!DOCTYPE html><html><head></head><body>${gridItemHTML}</body></html>`
+      }),
       ok: () => { newHashes[hash] = true; }
     });
   }
@@ -673,49 +657,16 @@ async function readEvents(page, previousEvents) {
     })};
 
   INBOUND.push({
-    email: buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', {html: emailHTML}),
+    email: em.buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', {html: emailHTML}),
     ok: () => okHandler()
   });
   if (doStudent) {
     INBOUND.push({
-      email: buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', 
+      email: em.buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', 
                  {html: emailHTML, to: CONFIG.options.emailToStudent}),
       ok: () => okHandler()
     });
   }
-}
-
-// ---------- General email functions ----------
-
-/**
- * Build a message ID using the same domain as the configured From: address and an ID unique within
- * Eltern-Emailer.
- */
-function buildMessageId(localId) {
-  return localId + '.eltern-emailer@' + CONFIG.options.emailFrom.replace(/.*@/, '');
-}
-
-function createTestEmails(numEmails) {
-  const emailToRecipient = buildEmail('TEST', 'TEST to Recipient', {
-    text: 'The test run was successful. ' + numEmails + ' email(s) would have been sent.'
-  });
-  const emailToSender = buildEmail('TEST', 'TEST to Sender', {
-    text: 'The test run was successful. ' + numEmails + ' email(s) would have been sent.'
-  });
-  [emailToSender.from, emailToSender.to] = [emailToSender.to, emailToSender.from];
-  return [
-    {email: emailToRecipient, ok: () => {}},
-    {email: emailToSender, ok: () => {}}
-  ];
-}
-
-/** Centralizes setting of common email options. */
-function buildEmail(fromName, subject, options) {
-  return {...{
-    from: '"EE ' + fromName.replace(/["\n]/g, '') + '" <' + CONFIG.options.emailFrom + '>',
-    to: CONFIG.options.emailTo,
-    subject: subject
-  }, ...options};
 }
 
 // ---------- Email sending ----------
@@ -764,7 +715,7 @@ async function sendEmails() {
           errors.length, INBOUND.length);
       // We send an email to report an error sending email. The hope is that the error is transient.
       INBOUND.push({
-        email: buildEmail('Fehlerteufel', 'Emailversand fehlgeschlagen', {
+        email: em.buildEmail('Fehlerteufel', 'Emailversand fehlgeschlagen', {
             text: `${errors.length} von ${INBOUND.length} Email(s) konnte(n) nicht gesendet `
             + `werden.\n\nFehler:\n${errors.join(',\n')}\n\nWeitere Details im Logfile.`,}),
         ok: () => {},
@@ -900,7 +851,7 @@ async function processNewEmail() {
     if (rejectedFrom !== null) {
       LOG.warn(`Rejecting incoming email from "${rejectedFrom}"`);
       INBOUND.push({
-        email: buildEmail('Fehlerteufel', 'Nachricht von fremdem Absender ignoriert', {
+        email: em.buildEmail('Fehlerteufel', 'Nachricht von fremdem Absender ignoriert', {
             text: `Nachricht von "${rejectedFrom}" an ` +
                   `${CONFIG.options.incomingEmail.forwardingAddress} wurde ignoriert.\n\n` +
                   'ACHTUNG: Diese Adresse sollte nicht veröffentlicht werden!',}),
@@ -1043,7 +994,7 @@ async function sendMessagesToTeachers(page) {
     } catch (e) {
       LOG.error('Failed to send message to teacher %d: %s', msg.teacherId, e);
       INBOUND.push({
-        email: buildEmail('Fehlerteufel', 'Nachrichtenversand fehlgeschlagen', {
+        email: em.buildEmail('Fehlerteufel', 'Nachrichtenversand fehlgeschlagen', {
             text: `Nachricht an Lehrer ${msg.teacherId} konnte nicht gesendet werden.\n\n`
             + `Fehler:\n${JSON.stringify(e)}\n\nWeitere Details im Logfile.`,}),
         ok: () => {}
@@ -1053,6 +1004,45 @@ async function sendMessagesToTeachers(page) {
 }
 
 // ---------- Main ----------
+
+async function processSchulmanager(page, state) {
+  await sm.login(page);
+  const letters = await sm.readLetters(page, state.sm.letters);
+  sm.buildEmailsForLetters(letters, state.sm.letters);
+}
+
+async function processElternPortal(page, state) {
+  await loginElternPortal(page);
+
+  // Send messages to teachers. We later retrieve those messages when crawling threads below. That
+  // is intentional because presumably the second parent wants a copy of the message.
+  await sendMessagesToTeachers(page);
+
+  // Section "Aktuelles".
+  const announcements = await readAnnouncements(page); // Always reads all.
+  await readAnnouncementsAttachments(page, announcements, state.ep.announcements);
+  buildEmailsForAnnouncements(page, announcements, state.ep.announcements);
+
+  // Section "Kommunikation Eltern/Klassenleitung".
+  const inquiries = await readInquiries(page);
+  buildEmailsForInquiries(inquiries, state.ep.inquiries);
+
+  // Section "Kommunikation Eltern/Fachlehrer".
+  const teachers = await readActiveTeachers(page);
+  await readThreadsMeta(page, teachers, state.ep.lastSuccessfulRun);
+  await readThreadsContents(page, teachers);
+  await readThreadsAttachments(page, teachers, state.ep.threads);
+  buildEmailsForThreads(teachers, state.ep.threads);
+
+  // Section "Vertretungsplan"
+  await readSubstitutions(page, state.ep.hashes);
+
+  // Section "Schwarzes Brett"
+  await readNoticeBoard(page, state.ep.hashes);
+
+  // Section "Schulaufgaben / Weitere Termine"
+  await readEvents(page, state.ep.events);
+}
 
 /** 
  * If this function returns normally, its return value will be the program's exit code. If it 
@@ -1067,11 +1057,11 @@ async function main() {
   CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
   CONFIG.imap.logger = IMAP_LOGGER; // standing orders
   CONFIG.imap.maxIdleTime ||= 60 * 1000; // 60s default
-  LOG = createLogger();
+  lg.initialize();
   LOG.info(TITLE);
 
   // Ensure config file has been edited.
-  if (CONFIG.elternportal.url.startsWith('https://SCHOOL.')) {
+  if (!elternPortalConfigured() && !schulmanagerConfigured()) {
     LOG.error('Please edit the config file to specify your login credentials, SMTP server etc.');
     return 2;
   }
@@ -1110,57 +1100,52 @@ async function main() {
 
     // Read state within the loop to allow editing the state file manually without restarting.
     const state = readState();
-    LOG.debug('Read state: %d announcements, %d threads, %d inquiries',
-        Object.keys(state.announcements).length,
-        Object.keys(state.threads).length,
-        Object.keys(state.inquiries).length);
-    const browser = await puppeteer.launch({headless: "new"}); // prevent deprecation warning
-    const page = await browser.newPage();
+    BROWSER = await puppeteer.launch({headless: 'new'}); // prevent deprecation warning
+    const page = await BROWSER.newPage();
 
-    await login(page);
+    // If both EP and SM are active, we process them sequentially. We catch a potential exception
+    // in SM and rethrow it after processing EP. A second exception in EP would take precedence.
 
-    // Send messages to teachers. We later retrieve those messages when crawling threads below. That
-    // is intentional because presumably the second parent wants a copy of the message.
-    await sendMessagesToTeachers(page);
+    // ---------- Schulmanager ----------
 
-    // Section "Aktuelles".
-    const announcements = await readAnnouncements(page); // Always reads all.
-    await readAnnouncementsAttachments(page, announcements, state.announcements);
-    buildEmailsForAnnouncements(page, announcements, state.announcements);
+    let schulmanagerException = null;
+    let schulmanagerOk = () => {};
+    if (schulmanagerConfigured()) {
+      try {
+        await processSchulmanager(page, state);
+        // There is currently nothing to do in the OK handler; we still keep it as a placeholder.
+      } catch (e) {
+        schulmanagerException = e;
+        LOG.error('Error for Schulmanager:\n%s', e.stack || e);
+      }
+    }
 
-    // Section "Kommunikation Eltern/Klassenleitung".
-    const inquiries = await readInquiries(page);
-    buildEmailsForInquiries(inquiries, state.inquiries);
+    // ---------- Eltern-Portal ----------
 
-    // Section "Kommunikation Eltern/Fachlehrer".
-    const teachers = await readActiveTeachers(page);
-    await readThreadsMeta(page, teachers, state.lastSuccessfulRun);
-    await readThreadsContents(page, teachers);
-    await readThreadsAttachments(page, teachers, state.threads);
-    buildEmailsForThreads(teachers, state.threads);
+    let elternPortalOk = () => {};
+    if (elternPortalConfigured()) {
+      await processElternPortal(page, state);
+      elternPortalOk = () => state.ep.lastSuccessfulRun = NOW;
+    }
 
-    // Section "Vertretungsplan"
-    await readSubstitutions(page, state.hashes);
-
-    // Section "Schwarzes Brett"
-    await readNoticeBoard(page, state.hashes);
-
-    // Section "Schulaufgaben / Weitere Termine"
-    await readEvents(page, state.events);
-
-    // Send emails to user and possibly update state.
+    // Send emails to user and update state, unless in test mode.
     if (CONFIG.options.test) {
       // Replace actual emails and don't update state.
-      INBOUND = createTestEmails(INBOUND.length);
+      INBOUND = em.createTestEmails(INBOUND.length);
       await sendEmails();
-    } else {
+    } else { // normal mode
       await sendEmails();
-      state.lastSuccessfulRun = NOW;
+      schulmanagerOk();
+      elternPortalOk();
       fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
     }
 
-    // Only close after OK handlers have run.
-    await browser.close();
+    // Only close after OK handlers (both above and in the emails) have run.
+    await BROWSER.close();
+
+    if (schulmanagerException) {
+      throw schulmanagerException;
+    }
 
     if (CONFIG.options.once) {
       LOG.info('Terminating due to --once flag/option');
