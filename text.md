@@ -23,13 +23,13 @@ All information is in your email client, enabling a fully email-based two-way co
 
 Primarily `*.eltern-portal.org` is supported:
 
-* Retrieves messages from the website and emails them to you (teacher &rarr; parent).
-* Receives emails from you and posts them on the website (parent &rarr; teacher).
-* Notifies you of upcoming events, news and substitutions (school &rarr; parent).
+* Retrieve messages from the website and email them to you (teacher &rarr; parent).
+* Receive emails from you and post them on the website (parent &rarr; teacher).
+* Notify you of upcoming events, news and substitutions (school &rarr; parent).
 
 Additionally, there is limited support for `schulmanager-online.de`:
 
-* Retrieves messages ("Elternbriefe") 
+* Retrieve messages ("Elternbriefe") 
 
 ## Project Status
 
