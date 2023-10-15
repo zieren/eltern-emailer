@@ -9,23 +9,27 @@ title: 'Eltern-Emailer'
 
 ## Overview
 
-Eltern-Emailer is an unofficial email interface for `*.eltern-portal.org` sites: 
+Eltern-Emailer is an unofficial email interface for communicating with German schools using `*.eltern-portal.org` or `schulmanager-online.de`. It allows you to simply use your email client instead of having to log into yet another website. This has several advantages:
+
+* **Saves time**<br>
+You see new information immediately, including attachments.
+* **Supports multiple parents**<br>
+Emails can be sent to multiple receivers via regular email forwarding. There is no issue with one parent resetting a message's `unread` status for the other parent.
+* **Supports the student**<br>
+General information such as substitution plan updates and upcoming events can be sent to the student.
+* **Integrates with email based workflows**<br>
+All information is in your email client, enabling a fully email-based two-way communication with teachers.
+* **Enables search in your email client**
+
+Primarily `*.eltern-portal.org` is supported:
 
 * Retrieves messages from the website and emails them to you (teacher &rarr; parent).
 * Receives emails from you and posts them on the website (parent &rarr; teacher).
 * Notifies you of upcoming events, news and substitutions (school &rarr; parent).
 
-This has several advantages:
+Additionally, there is limited support for `schulmanager-online.de`:
 
-* **Saves time**<br>
-You no longer have to log into the portal to check for new information.
-* **Supports multiple parents**<br>
-Emails can be sent to multiple receivers via regular email forwarding. The portal, on the other hand, works only for a single parent, e.g. it will not highlight new messages for a second parent.
-* **Supports the student**<br>
-Substitution plan and upcoming events can be sent to the student.
-* **Integrates with email based workflows**<br>
-All information is in your email client. Fully email-based two-way communication with teachers.
-* **Enables search in your email client**
+* Retrieves messages ("Elternbriefe") 
 
 ## Project Status
 
@@ -33,7 +37,7 @@ This project is in beta state.
 
 ## How it Works
 
-Eltern-Emailer logs into the Eltern-Portal website and checks for new messages and updated content in certain [categories](#_supported-sections-at-head), e.g.
+Eltern-Emailer logs into `yourschool.eltern-portal.org` and checks for new messages and updated content in certain [categories](#_supported-sections-at-head), e.g.
 
 * news in `Aktuelles` and `Schwarzes Brett`
 * messages from teachers in `Kommunikation Eltern/Fachlehrer/Klassenleitung`
@@ -56,6 +60,10 @@ Eltern-Emailer requires the free [Node.js](https://en.wikipedia.org/wiki/Node.js
 
 ### Supported Sections (at HEAD)
 
+Schools use different feature subsets. If a feature is missing for your school, let me know or, even better, contribute code.
+
+#### Eltern-Portal
+
 The following sections in the web UI are supported:
 
 * `Aktuelles`
@@ -65,12 +73,14 @@ The following sections in the web UI are supported:
 * `Schwarzes Brett`
 * `Schulaufgaben / Weitere Termine`
 
-### Planned Features
+##### Planned Features
 
 * Send messages to "Klassenleitung".
 * Run on a Raspberry Pi.
 
-Schools use different feature subsets of the portal. If a feature is missing for your school, let me know or, even better, contribute code.
+#### Schulmanager
+
+Only `Elternbriefe` (messages to parents) are currently supported.
 <a id="_installation"></a>
 
 ## Installation
@@ -104,6 +114,17 @@ These parameters are used to log into the Eltern-Portal.
 * `user` The login email address
 * `pass` The login password
 
+To disable Eltern-Portal (and only use Schulmanager), leave the defaults unchanged or remove the whole `elternportal` section.
+
+### `schulmanager`
+
+These parameters are used to log into the Eltern-Portal.
+
+* `user` The login email address
+* `pass` The login password
+
+To disable Schulmanager (and only use Eltern-Portal), leave the defaults unchanged or remove the whole `schulmanager` section.
+
 ### `smtp`
 
 These parameters configure the SMTP transport in the Nodemailer module. The full set of options described in the [Nodemailer documentation](https://nodemailer.com/smtp/) is available. The default values for `port` (465) and `secure` (true) work well for many servers (e.g. Outlook web mail), but yours may require different settings.
@@ -136,7 +157,7 @@ These control the behavior of Eltern-Emailer.
 * `logLevel` The level of detail in the log file and console. These are [npm logging levels](https://github.com/winstonjs/winston#logging-levels).
 <a id="_sending-messages-to-teachers"></a>
 
-### Sending Messages to Teachers
+### Sending Messages to Teachers (Eltern-Portal only)
 
 Eltern-Emailer can receive emails from you and forward them to teachers via the website. This requires a dedicated email account accessible via IMAP (see [`imap`](#_imap) above). The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. Outlook web mail is known to work.
 
@@ -145,7 +166,7 @@ The message size limit enforced by the website does not apply here. If your emai
 
 #### Protection Against Impersonation
 
-!! Emails received at the `incomingEmail.forwardingAddress` are forwarded to teachers using your identity the portal. This constitutes an impersonation risk. Securely preventing impersonation would require signing messages in the email client and verifying the signature in Eltern-Emailer. This is not supported.
+!! Emails received at the `incomingEmail.forwardingAddress` are forwarded to teachers using your login to the website. This constitutes an impersonation risk. Securely preventing impersonation would require signing messages in the email client and verifying the signature in Eltern-Emailer. This is not supported.
 
 To make impersonation unlikely you should choose an email address that is hard to guess, e.g. `qmqztwrp3g2em78qatms@example.com`, and never publish it. In the config file, specify this address under `incomingEmail.forwardingAddress`.
 
@@ -159,18 +180,18 @@ When you receive an email for a thread in `Kommunikation Eltern/Fachlehrer` you 
 
 #### Initial Email to a Teacher
 
-Sending an initial email to a teacher requires a per-teacher setup. Visit the teacher's contact link in the portal under `Kommunikation Eltern/Fachlehrer`, then copy the numerical teacher ID from the URL. E.g. for `https://*.eltern-portal.org/meldungen/kommunikation_fachlehrer/123/Doe_John` this would be 123. Create a contact in your email client with the name of the teacher and the above email address with the teacher ID as a tag, e.g. `qmqztwrp3g2em78qatms+123@example.com`. When you now type the teacher's name in your email client, it should autocomplete the email address including the tag.
+Sending an initial email to a teacher requires a per-teacher setup. Visit the teacher's contact link on the website under `Kommunikation Eltern/Fachlehrer`, then copy the numerical teacher ID from the URL. E.g. for `https://*.eltern-portal.org/meldungen/kommunikation_fachlehrer/123/Doe_John` this would be 123. Create a contact in your email client with the name of the teacher and the above email address with the teacher ID as a tag, e.g. `qmqztwrp3g2em78qatms+123@example.com`. When you now type the teacher's name in your email client, it should autocomplete the email address including the tag.
 <a id="_reducing-latency"></a>
 
 ### Reducing Latency
 
-Eltern-Emailer can check for the notification email sent by the portal whenever a new message is available. This requires a dedicated email account as described [above](#_sending-messages-to-teachers). As soon as a notification (or any message, actually) is received, the portal is checked immediately.
+Eltern-Emailer can check for the notification email sent by the website whenever a new message is available. This requires a dedicated email account as described [above](#_sending-messages-to-teachers). As soon as a notification (or any message, actually) is received, the website is checked immediately.
 
-You can simply configure the email account you are currently using for the portal to forward notification emails or simply all emails to this dedicated address. Emails that are not notifications (e.g. sick leave confirmations) will also trigger a check, but this is rare and should not cause problems. Also, since these forwarded notifications (or any other forwarded messages) will not have the `incomingEmail.forwardingAddress` in their recipients, they can be distinguished from messages intended for teachers and are not processed.
+You can simply configure the email account you are currently using for the website to forward notification emails or simply all emails to this dedicated address. Emails that are not notifications (e.g. sick leave confirmations) will also trigger a check, but this is rare and should not cause problems. Also, since these forwarded notifications (or any other forwarded messages) will not have the `incomingEmail.forwardingAddress` in their recipients, they can be distinguished from messages intended for teachers and are not processed.
 
 ## Running the Application
 
-Eltern-Emailer runs in the Node.js runtime environment. It does not use the portal's indication of new messages (because that is reset when you read them online, and it's also not supported for some types of content). Instead it uses a file called `state.json` to remember which content has already been emailed and detect which is new.
+Eltern-Emailer runs in the Node.js runtime environment. It does not use the website's indication of new messages (because that is reset when you read them online, and it's also not supported for some types of content). Instead it uses a file called `state.json` to remember which content has already been emailed and detect which is new.
 
 Initially this file does not exist and all messages and content will appear new. If you don't want to get flooded with emails on the first run, run Eltern-Emailer once with these [flags](#_flags):
 
@@ -208,6 +229,7 @@ The following flags are supported:
 * `--test` See [Configuration: options](#_options) above.
 * `--config=file.json` Set the config filename.
 * `--ep_password=abc123` Specify the Eltern-Portal login password.
+* `--sm_password=abc123` Specify the Schulmanager login password.
 * `--smtp_password=abc123` Specify the SMTP server password.
 * `--imap_password=abc123` Specify the IMAP server password.
 
@@ -222,6 +244,7 @@ Eltern-Emailer uses the following components:
 * [Puppeteer](https://github.com/puppeteer/puppeteer) for automated browsing (&copy; Google Inc., Apache-2.0 license)
 * [Nodemailer](https://github.com/nodemailer/nodemailer), [imapflow](https://github.com/postalsys/imapflow) and [mailparser](https://github.com/nodemailer/mailparser) for sending/receiving/parsing email (MIT and custom licenses)
 * [winston](https://github.com/winstonjs/winston) for logging (MIT license)
+* [fs-extra](https://github.com/jprichardson/node-fs-extra) for file system utilities (MIT license)
 * [args-and-flags](https://github.com/sethvincent/args-and-flags) for commandline flags (ISC license)
 * [content-disposition](https://github.com/jshttp/content-disposition) for attachment filenames (MIT license)
 * [md5](https://github.com/pvorb/node-md5) for MD5 hash (BSD 3-Clause license)
