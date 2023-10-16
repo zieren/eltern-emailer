@@ -533,11 +533,14 @@ async function readSubstitutions(page, previousHashes) {
 
 async function readNoticeBoard(page, previousHashes) {
   await page.goto(CONFIG.elternportal.url + '/aktuelles/schwarzes_brett');
-  const gridItemsHTML =
-      await page.$$eval('div.grid-item', (divs) => divs.map(div => div.innerHTML));
+  const currentItems = await page.$$('div.grid-item');
+  const archivedItems = await page.$$('div.well');
+  const allItems = currentItems.concat(archivedItems);
   let newHashes = {};
-  for (const gridItemHTML of gridItemsHTML) {
-    const hash = md5(gridItemHTML);
+  for (const item of allItems) {
+    const innerHTML = await page.evaluate(item => item.innerHTML, item);
+    const subject = await item.$eval('h4', h => h.innerText);
+    const hash = md5(innerHTML);
     if (previousHashes.notices[hash]) {
       newHashes[hash] = true;
       continue;
@@ -545,8 +548,8 @@ async function readNoticeBoard(page, previousHashes) {
     LOG.info('Found notice board message');
     newHashes[hash] = false;
     INBOUND.push({
-      email: em.buildEmail('Schwarzes Brett', 'Schwarzes Brett', {
-        html: `<!DOCTYPE html><html><head></head><body>${gridItemHTML}</body></html>`
+      email: em.buildEmail('Schwarzes Brett', subject, {
+        html: `<!DOCTYPE html><html><head></head><body>${innerHTML}</body></html>`
       }),
       ok: () => { newHashes[hash] = true; }
     });
