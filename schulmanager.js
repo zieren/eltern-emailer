@@ -42,12 +42,13 @@ function maybeCreateTempDir() {
 }
 
 /**
- * Expands the list of letters until the specified number of letters is shown. Specify zero to 
+ * Expands the list of letters until the specified number of letters is shown. Specify zero to
  * expand completely. Unfortunately the list is collapsed again after viewing a letter, so this
- * function may have to be called repeatedly. Returns a string for logging, if desired.
+ * function may have to be called repeatedly (if there are many new letters). Returns a string for
+ * logging, if desired.
  */
 async function expandLetters(page, numToShow) {
-    // Expand entire list. TODO: Verify that this still works with >1 clicks.
+    // Expand entire list by clicking "load more" repeatedly.
   while (true) {
     const loadMore = await page.$('a.back-link[href="#/dashboard"] ~ h1 ~ div button');
     const numShown = await page.$$eval('tr td.title-column', (tds) => tds.length);
