@@ -1,4 +1,4 @@
-const TITLE = 'Eltern-Emailer 0.7.0 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.7.1 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
     + ' See https://zieren.de/software/eltern-emailer for component license info';
 
 const contentDisposition = require('content-disposition');
@@ -276,7 +276,7 @@ function buildEmailsForAnnouncements(page, announcements, processedAnnouncements
       // the reception date instead), so it's the best we can do.
       .reverse()
       .map(a => {
-        const email = em.buildEmail('Aktuelles', a.subject, {
+        const email = em.buildEmail('Elternbrief', em.recipientsEpAnnouncements(), a.subject, {
           text: a.body,
           date: new Date(a.dateString)});
         if (a.content) {
@@ -417,7 +417,7 @@ function buildEmailsForThreads(teachers, processedThreads) {
           // The thread ID seems to be globally unique. Including the teacher ID simplifies posting
           // replies, because the mail client will put this ID in the In-Reply-To header.
           const messageIdBase = 'thread-' + teacher.id + '-' + thread.id + '-';
-          const email = em.buildEmail(msg.author, thread.subject, {
+          const email = em.buildEmail(msg.author, em.recipientsEpThreads(), thread.subject, {
             messageId: em.buildMessageId(messageIdBase + i),
             text: msg.body
           });
@@ -441,7 +441,8 @@ function buildEmailsForThreads(teachers, processedThreads) {
                 + '>';
           }
           INBOUND.push({
-            // We don't forge the date here because time of day is not available.
+            // We don't forge the date here because time of day is not available. It would be
+            // confusing to have all messages written on the same day show up at "00:00".
             email: email,
             ok: () => { processedThreads[thread.id][i] = 1; }
           });
@@ -477,18 +478,22 @@ function buildEmailsForInquiries(inquiries, processedInquiries) {
     }
     for (let j = processedInquiries[i]; j < inquiry.messages.length; ++j) {
       // AFAICT each thread has at most two messages.
-      const email = em.buildEmail(INQUIRY_AUTHOR[Math.min(j, 2)], inquiry.subject, {
-        // TODO: Consider enriching this, see TODO for other messageId (#4).
-        messageId: em.buildMessageId('inquiry-' + i + '-' + j),
-        // TODO: ^^ What if these are cleared after the school year, and indexes start at 0 again?
-        // Maybe include a hash of the subject, or the date, to avoid collisions.
-        text: inquiry.messages[j]
-      });
+      const email = em.buildEmail(
+          INQUIRY_AUTHOR[Math.min(j, 2)],
+          em.recipientsEpThreads(), 
+          inquiry.subject,
+          { // TODO: Consider enriching this, see TODO for other messageId (#4).
+            messageId: em.buildMessageId('inquiry-' + i + '-' + j),
+            // TODO: ^^ What if these are cleared after the school year, and indexes start at 0 again?
+            // Maybe include a hash of the subject, or the date, to avoid collisions.
+            text: inquiry.messages[j]
+          });
       if (j > 0) {
         email.references = [em.buildMessageId('inquiry-' + i + '-' + (j - 1))];
       }
       INBOUND.push({
-        // We don't forge the date here because time of day is not available.
+        // We don't forge the date here because time of day is not available. It would be confusing
+        // to have all messages written on the same day show up at "00:00".
         email: email,
         ok: () => { processedInquiries[i] = j + 1; }
         // TODO: This relies on execution order. Fix it to match handling of threads.
@@ -503,29 +508,18 @@ async function readSubstitutions(page, previousHashes) {
   await page.goto(CONFIG.elternportal.url + '/service/vertretungsplan');
   const originalHTML = await page.$eval('div#asam_content', (div) => div.innerHTML);
   const hash = md5(originalHTML);
-  const doParent = hash !== previousHashes.subs;
-  const doStudent = doParent && !!CONFIG.options.emailToStudent;
-  if (!doParent && !doStudent) {
+  if (hash === previousHashes.subs) {
     return;
   }
 
   const modifiedHTML = '<!DOCTYPE html><html><head><title>Vertretungsplan</title>'
       + '<style>table, td { border: 1px solid; } img { display: none; }</style></head>'
       + '<body>' + originalHTML + '</body></html>';
-  let emailsLeft = (doParent && doStudent) ? 2 : 1;
-  if (doParent) {
-    INBOUND.push({
-      email: em.buildEmail('Vertretungsplan', 'Vertretungsplan', {html: modifiedHTML}),
-      ok: () => { if (!--emailsLeft) previousHashes.subs = hash; }
-    });
-  }
-  if (doStudent) {
-    INBOUND.push({
-      email: em.buildEmail('Vertretungsplan', 'Vertretungsplan', 
-                 {html: modifiedHTML, to: CONFIG.options.emailToStudent}),
-      ok: () => { if (!--emailsLeft) previousHashes.subs = hash; }
-    });
-  }
+  INBOUND.push({
+    email: em.buildEmail('Vertretungsplan', em.recipientsEpSubstitutions(), 'Vertretungsplan', 
+        {html: modifiedHTML}),
+    ok: () => { previousHashes.subs = hash; }
+  });
   LOG.info('Found substitution plan update');
 }
 
@@ -548,7 +542,7 @@ async function readNoticeBoard(page, previousHashes) {
     LOG.info('Found notice board message');
     newHashes[hash] = false;
     INBOUND.push({
-      email: em.buildEmail('Schwarzes Brett', subject, {
+      email: em.buildEmail('Schwarzes Brett', em.recipientsEpNotices(), subject, {
         html: `<!DOCTYPE html><html><head></head><body>${innerHTML}</body></html>`
       }),
       ok: () => { newHashes[hash] = true; }
@@ -648,12 +642,10 @@ async function readEvents(page, previousEvents) {
       + ' Tagen</h2><table>';
   upcomingEvents.forEach(e => emailHTML += STATUS_TO_HTML[e.status] + '</td>' + e.html + '</tr>');
   emailHTML += '</table></body></html>';
-  const doStudent = !!CONFIG.options.emailToStudent;
-  let emailsLeft = doStudent ? 2 : 1;
 
   const okHandler = function() {
     // Update state of previous (announced) events when all emails are sent.
-    if (!--emailsLeft) upcomingEvents.forEach(e => {
+    upcomingEvents.forEach(e => {
       if (e.status == 1) {
         previousEvents[e.html] = e.ts; // new event -> no longer new next time
       } else if (e.status == -1) {
@@ -662,16 +654,10 @@ async function readEvents(page, previousEvents) {
     })};
 
   INBOUND.push({
-    email: em.buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', {html: emailHTML}),
+    email: em.buildEmail('Termine', em.recipientsEpEvents(), 'Bevorstehende Termine', 
+        {html: emailHTML}),
     ok: () => okHandler()
   });
-  if (doStudent) {
-    INBOUND.push({
-      email: em.buildEmail('Bevorstehende Termine', 'Bevorstehende Termine', 
-                 {html: emailHTML, to: CONFIG.options.emailToStudent}),
-      ok: () => okHandler()
-    });
-  }
 }
 
 // ---------- Email sending ----------
@@ -720,9 +706,14 @@ async function sendEmails() {
           errors.length, INBOUND.length);
       // We send an email to report an error sending email. The hope is that the error is transient.
       INBOUND.push({
-        email: em.buildEmail('Fehlerteufel', 'Emailversand fehlgeschlagen', {
-            text: `${errors.length} von ${INBOUND.length} Email(s) konnte(n) nicht gesendet `
-            + `werden.\n\nFehler:\n${errors.join(',\n')}\n\nWeitere Details im Logfile.`,}),
+        email: em.buildEmail(
+            'Fehlerteufel',
+            em.recipientsAdmin(),
+            'Emailversand fehlgeschlagen',
+            {
+              text: `${errors.length} von ${INBOUND.length} Email(s) konnte(n) nicht gesendet `
+                + `werden.\n\nFehler:\n${errors.join(',\n')}\n\nWeitere Details im Logfile.`
+            }),
         ok: () => {},
         ignoreFailure: true
       });
@@ -856,10 +847,15 @@ async function processNewEmail() {
     if (rejectedFrom !== null) {
       LOG.warn(`Rejecting incoming email from "${rejectedFrom}"`);
       INBOUND.push({
-        email: em.buildEmail('Fehlerteufel', 'Nachricht von fremdem Absender ignoriert', {
-            text: `Nachricht von "${rejectedFrom}" an ` +
+        email: em.buildEmail(
+            'Fehlerteufel',
+            em.recipientsAdmin(),
+            'Nachricht von fremdem Absender ignoriert',
+            {
+              text: `Nachricht von "${rejectedFrom}" an ` +
                   `${CONFIG.options.incomingEmail.forwardingAddress} wurde ignoriert.\n\n` +
-                  'ACHTUNG: Diese Adresse sollte nicht veröffentlicht werden!',}),
+                  'ACHTUNG: Diese Adresse sollte nicht veröffentlicht werden!'
+            }),
         ok: () => {}
       });
       continue;
@@ -999,9 +995,14 @@ async function sendMessagesToTeachers(page) {
     } catch (e) {
       LOG.error('Failed to send message to teacher %d: %s', msg.teacherId, e);
       INBOUND.push({
-        email: em.buildEmail('Fehlerteufel', 'Nachrichtenversand fehlgeschlagen', {
-            text: `Nachricht an Lehrer ${msg.teacherId} konnte nicht gesendet werden.\n\n`
-            + `Fehler:\n${JSON.stringify(e)}\n\nWeitere Details im Logfile.`,}),
+        email: em.buildEmail(
+            'Fehlerteufel',
+            em.recipientsAdmin(),
+            'Nachrichtenversand fehlgeschlagen',
+            {
+              text: `Nachricht an Lehrer ${msg.teacherId} konnte nicht gesendet werden.\n\n`
+                  + `Fehler:\n${JSON.stringify(e)}\n\nWeitere Details im Logfile.`
+            }),
         ok: () => {}
       });
     }
@@ -1136,7 +1137,7 @@ async function main() {
     // Send emails to user and update state, unless in test mode.
     if (CONFIG.options.test) {
       // Replace actual emails and don't update state.
-      INBOUND = em.createTestEmails(INBOUND.length);
+      INBOUND = em.createTestEmail(INBOUND.length);
       await sendEmails();
     } else { // normal mode
       await sendEmails();

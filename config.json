@@ -2,11 +2,23 @@
   "elternportal": {
     "url": "https://SCHOOL.eltern-portal.org/",
     "user": "EMAIL ADDRESS FOR LOGIN",
-    "pass": "PASSWORD"
+    "pass": "PASSWORD",
+    "recipients": {
+      "*": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."],
+      "lehrerkommunikation": [],
+      "elternbriefe": [],
+      "schwarzesbrett": [],
+      "vertretungsplan": [],
+      "termine": []
+    }
   },
   "schulmanager": {
     "user": "EMAIL ADDRESS FOR LOGIN",
-    "pass": "PASSWORD"
+    "pass": "PASSWORD",
+    "recipients": {
+      "*": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."],
+      "elternbriefe": []
+    }
   },
   "smtp": {
     "host": "YOUR SMTP SERVER",
@@ -27,9 +39,7 @@
     }
   },
   "options": {
-    "emailFrom": "RETURN EMAIL ADDRESS",
-    "emailTo": "PARENT(S) EMAIL ADDRESS",
-    "emailToStudent": "STUDENT EMAIL ADDRESS (OPTIONAL; EMPTY TO DISABLE)",
+    "adminAddress": "PARENT 1 EMAIL ADDRESS",
     "incomingEmail": {
       "enabled": true,
       "forwardingAddress": "IMAP EMAIL ADDRESS",

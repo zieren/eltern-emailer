@@ -192,7 +192,7 @@ async function readLetters(page, processedLetters) {
 
 function buildEmailsForLetters(letters, processedLetters) {
   for (const letter of letters) {
-    const email = em.buildEmail('Elternbrief', letter.subject, {
+    const email = em.buildEmail('Elternbrief', em.recipientsSmAnnouncements(), letter.subject, {
       messageId: em.buildMessageId(letter.smLetterId),
       text: letter.text,
       html: letter.html,
