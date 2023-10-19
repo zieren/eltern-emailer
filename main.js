@@ -312,13 +312,16 @@ async function readActiveTeachers(page) {
     'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]:first-child',
     (anchors) => anchors.map(
       (a) => {
-        // Some roles (e.g. director) are added after the name, separated by "<br>", which is 
-        // %-encoded. We strip that to get the name (in "last name first" order, in our school).
         const m = a.href.match(/.*\/([0-9]+)\/(.*)/);
         return {
           id: m[1],
           url: a.href,
-          name: decodeURI(m[2]).replace(/<.*/, '').replace(/_/g, ' ')
+          // This may be specific to our school: EP displays a teacher's name in many different
+          // variations. We can easily get one here, but it is dirtier than others: It is in "Last,
+          // First" order, and some roles (e.g. director) are added after the name, separated by
+          // "<br>", which is %-encoded. We strip that here, but keep the reverse order. Later on we
+          // can get the name in forward order, so we use this only for logging.
+          nameForLogging: decodeURIComponent(m[2]).replace(/<.*/, '').replace(/[+_]/g, ' ')
         };
       }));
   LOG.info('Found %d teachers with threads', teachers.length);
@@ -331,7 +334,7 @@ async function readActiveTeachers(page) {
  */
 async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
   for (const teacher of teachers) {
-    LOG.debug('Reading threads with %s', teacher.name);
+    LOG.debug('Reading threads with %s', teacher.nameForLogging);
     await page.goto(teacher.url);
     teacher.threads = (await page.$$eval(
         'a[href*="meldungen/kommunikation_fachlehrer/"]',
@@ -345,7 +348,8 @@ async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
           return {
             id: m[2],
             url: a.href,
-            teacherName: decodeURI(m[1]).replace(/_/g, ' '),
+            // Not sure I've seen quotes or newlines; just trying to ensure an RFC2822 valid name.
+            teacherName: decodeURIComponent(m[1]).replace(/[+"\n_]/g, ' '),
             subject: a.textContent,
             // We add two days to the date to account for a) lacking time of day, b) timezones, and
             // c) clock skew. There is no need to cut it close, the performance gain would not
@@ -434,11 +438,9 @@ function buildEmailsForThreads(teachers, processedThreads) {
           }
           if (CONFIG.options.incomingEmail.forwardingAddress) {
             // We always put the teacher ID here, so the user can also reply to their own messages.
-            email.replyTo = 
-                '"' + thread.teacherName.replace(/"/g, '') + '" <'
-                + CONFIG.options.incomingEmail.forwardingAddress
-                    .replace('@', '+' + teacher.id + '@');
-                + '>';
+            const address = 
+                CONFIG.options.incomingEmail.forwardingAddress.replace('@', `+${teacher.id}@`);
+            email.replyTo = `"${thread.teacherName}" <${address}>`;
           }
           INBOUND.push({
             // We don't forge the date here because time of day is not available. It would be

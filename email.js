@@ -59,7 +59,7 @@ function buildEmailEpSubstitutions(options) {
 
 function buildEmailEpThreads(teacherName, subject, options) {
   return buildEmail(
-      `${CONFIG.elternportal.tag} ${teacherName.replace(/["\n]/g, '')}`,
+      `${CONFIG.elternportal.tag} ${teacherName}`,
       CONFIG.elternportal.recipients['*'].concat(
           CONFIG.elternportal.recipients.lehrerkommunikation),
       subject,
