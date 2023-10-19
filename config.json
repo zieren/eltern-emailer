@@ -3,6 +3,7 @@
     "url": "https://SCHOOL.eltern-portal.org/",
     "user": "EMAIL ADDRESS FOR LOGIN",
     "pass": "PASSWORD",
+    "tag": "SHORT NAME IN EMAIL SENDER",
     "recipients": {
       "*": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."],
       "lehrerkommunikation": [],
@@ -15,6 +16,7 @@
   "schulmanager": {
     "user": "EMAIL ADDRESS FOR LOGIN",
     "pass": "PASSWORD",
+    "tag": "SHORT NAME IN EMAIL SENDER",
     "recipients": {
       "*": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."],
       "elternbriefe": []

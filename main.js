@@ -276,7 +276,7 @@ function buildEmailsForAnnouncements(page, announcements, processedAnnouncements
       // the reception date instead), so it's the best we can do.
       .reverse()
       .map(a => {
-        const email = em.buildEmail('Elternbrief', em.recipientsEpAnnouncements(), a.subject, {
+        const email = em.buildEmailEpAnnouncements(a.subject, {
           text: a.body,
           date: new Date(a.dateString)});
         if (a.content) {
@@ -417,7 +417,7 @@ function buildEmailsForThreads(teachers, processedThreads) {
           // The thread ID seems to be globally unique. Including the teacher ID simplifies posting
           // replies, because the mail client will put this ID in the In-Reply-To header.
           const messageIdBase = 'thread-' + teacher.id + '-' + thread.id + '-';
-          const email = em.buildEmail(msg.author, em.recipientsEpThreads(), thread.subject, {
+          const email = em.buildEmailEpThreads(msg.author, thread.subject, {
             messageId: em.buildMessageId(messageIdBase + i),
             text: msg.body
           });
@@ -478,9 +478,8 @@ function buildEmailsForInquiries(inquiries, processedInquiries) {
     }
     for (let j = processedInquiries[i]; j < inquiry.messages.length; ++j) {
       // AFAICT each thread has at most two messages.
-      const email = em.buildEmail(
+      const email = em.buildEmailEpThreads(
           INQUIRY_AUTHOR[Math.min(j, 2)],
-          em.recipientsEpThreads(), 
           inquiry.subject,
           { // TODO: Consider enriching this, see TODO for other messageId (#4).
             messageId: em.buildMessageId('inquiry-' + i + '-' + j),
@@ -516,8 +515,7 @@ async function readSubstitutions(page, previousHashes) {
       + '<style>table, td { border: 1px solid; } img { display: none; }</style></head>'
       + '<body>' + originalHTML + '</body></html>';
   INBOUND.push({
-    email: em.buildEmail('Vertretungsplan', em.recipientsEpSubstitutions(), 'Vertretungsplan', 
-        {html: modifiedHTML}),
+    email: em.buildEmailEpSubstitutions({html: modifiedHTML}),
     ok: () => { previousHashes.subs = hash; }
   });
   LOG.info('Found substitution plan update');
@@ -542,7 +540,7 @@ async function readNoticeBoard(page, previousHashes) {
     LOG.info('Found notice board message');
     newHashes[hash] = false;
     INBOUND.push({
-      email: em.buildEmail('Schwarzes Brett', em.recipientsEpNotices(), subject, {
+      email: em.buildEmailEpNotices(subject, {
         html: `<!DOCTYPE html><html><head></head><body>${innerHTML}</body></html>`
       }),
       ok: () => { newHashes[hash] = true; }
@@ -654,8 +652,7 @@ async function readEvents(page, previousEvents) {
     })};
 
   INBOUND.push({
-    email: em.buildEmail('Termine', em.recipientsEpEvents(), 'Bevorstehende Termine', 
-        {html: emailHTML}),
+    email: em.buildEmailEpEvents({html: emailHTML}),
     ok: () => okHandler()
   });
 }
@@ -706,9 +703,7 @@ async function sendEmails() {
           errors.length, INBOUND.length);
       // We send an email to report an error sending email. The hope is that the error is transient.
       INBOUND.push({
-        email: em.buildEmail(
-            'Fehlerteufel',
-            em.recipientsAdmin(),
+        email: em.buildEmailAdmin(
             'Emailversand fehlgeschlagen',
             {
               text: `${errors.length} von ${INBOUND.length} Email(s) konnte(n) nicht gesendet `
@@ -847,9 +842,7 @@ async function processNewEmail() {
     if (rejectedFrom !== null) {
       LOG.warn(`Rejecting incoming email from "${rejectedFrom}"`);
       INBOUND.push({
-        email: em.buildEmail(
-            'Fehlerteufel',
-            em.recipientsAdmin(),
+        email: em.buildEmailAdmin(
             'Nachricht von fremdem Absender ignoriert',
             {
               text: `Nachricht von "${rejectedFrom}" an ` +
@@ -995,9 +988,7 @@ async function sendMessagesToTeachers(page) {
     } catch (e) {
       LOG.error('Failed to send message to teacher %d: %s', msg.teacherId, e);
       INBOUND.push({
-        email: em.buildEmail(
-            'Fehlerteufel',
-            em.recipientsAdmin(),
+        email: em.buildEmailAdmin(
             'Nachrichtenversand fehlgeschlagen',
             {
               text: `Nachricht an Lehrer ${msg.teacherId} konnte nicht gesendet werden.\n\n`

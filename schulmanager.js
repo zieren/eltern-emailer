@@ -142,9 +142,6 @@ async function readLetters(page, processedLetters) {
         html: `<!DOCTYPE html><html><head></head><body>${d.innerHTML}</body></html>`
       };
     });
-
-    // Get the actual Schulmanager letter ID from the URL. We use it to build a unique message ID.
-    letter.smLetterId = page.url().split('/').slice(-1);
     letter.text = content.text;
     letter.html = content.html;
 
@@ -192,8 +189,8 @@ async function readLetters(page, processedLetters) {
 
 function buildEmailsForLetters(letters, processedLetters) {
   for (const letter of letters) {
-    const email = em.buildEmail('Elternbrief', em.recipientsSmAnnouncements(), letter.subject, {
-      messageId: em.buildMessageId(letter.smLetterId),
+    const email = em.buildEmailSmAnnouncements(letter.subject, {
+      // Let the message ID be random; we never reference this message.
       text: letter.text,
       html: letter.html,
       date: new Date(letter.dateString),
