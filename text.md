@@ -4,7 +4,7 @@ title: 'Eltern-Emailer'
 
 ## Resources
 
-* Download the [latest version](https://github.com/zieren/eltern-emailer/releases/latest)
+* [Download the latest version](https://github.com/zieren/eltern-emailer/releases/latest)
 * [GitHub page](https://github.com/zieren/eltern-emailer) with [version history](https://github.com/zieren/eltern-emailer/releases) and [issue tracker](https://github.com/zieren/eltern-emailer/issues)
 
 ## Overview
@@ -16,7 +16,7 @@ You see new information immediately, including attachments.
 * **Supports multiple parents**<br>
 Emails can be sent to multiple receivers via regular email forwarding. There is no issue with one parent resetting a message's `unread` status for the other parent.
 * **Supports the student**<br>
-General information such as substitution plan updates and upcoming events can be sent to the student.
+General information such as substitution plan updates and upcoming events can be sent to the student or even to other parents.
 * **Integrates with email based workflows**<br>
 All information is in your email client, enabling a fully email-based two-way communication with teachers.
 * **Enables search in your email client**
@@ -91,15 +91,15 @@ Only `Elternbriefe` (messages to parents) are currently supported.
    ```
    npm install args-and-flags content-disposition fs-extra imapflow mailparser md5 nodemailer puppeteer winston
    ```
-1. Edit the file `config.json` to specify your login credentials, SMTP/IMAP servers etc. All uppercase parts need to be replaced. If you don't want to store credentials in a file you can pass them via commandline flags (see [Flags](#_flags)). See section [Configuration](#_configuration) below for a detailed description of all options.
+1. Edit the file `config.json` to specify your login credentials, SMTP/IMAP servers etc. All uppercase parts in the sections you want to enable need to be replaced. If you don't want to store credentials in a file you can pass them via commandline flags (see [Flags](#_flags)). See section [Configuration](#_configuration) below for a detailed description of all options.
 
    **WARNING**
    Keep in mind that the emails sent may contain sensitive personal information. Be sure to specify the correct `emailTo` and `emailFrom` addresses in the config file.
-1. Run the application once in test mode to verify the credentials for the website and the email server, and to be sure the `emailTo` and `emailFrom` addresses are correct:
+1. Run the application once in test mode to verify the credentials for the website and the email server:
    ```
    node main.js --test --once
    ```
-   This will send two test emails, one to the regular recipient (`emailTo`) and one to the sender's return address (`emailFrom`). The latter is where an undeliverable email would bounce to. The test emails only say how many emails would have been sent in normal mode. They contain no personal information. Verify that both emails arrive at the correct addresses.
+   This will send a test email to the `adminAddress` specified under `options`. The message only says how many emails would have been sent in normal mode.
 <a id="_configuration"></a>
 
 ## Configuration
@@ -108,22 +108,27 @@ The following sections describe the homonymous parts in the `config.json` file.
 
 ### `elternportal`
 
-These parameters are used to log into the Eltern-Portal.
+These parameters are used to log into the Eltern-Portal. To disable Eltern-Portal, leave the defaults unchanged or remove the whole `elternportal` section.
 
 * `url` The URL of your school's Eltern-Portal, e.g. `https://theogymuc.eltern-portal.org`
 * `user` The login email address
 * `pass` The login password
-
-To disable Eltern-Portal (and only use Schulmanager), leave the defaults unchanged or remove the whole `elternportal` section.
+* `tag` A short name used to identify the school in emails
+* `recipients` This controls who receives the different categories of messages. Each takes a comma-separated list of zero or more addresses, enclosed in `[]`.
+  * `*` Receives everything
+  * `lehrerkommunikation` Personal messages from teachers to parents ("Kommunikation Eltern/Fachlehrer" and ".../Klassenleitung")
+  * The rest is self-explanatory. You may want to specify the student for some categories, e.g. `vertretungsplan` and `termine`.
 
 ### `schulmanager`
 
-These parameters are used to log into the Eltern-Portal.
+These parameters are used to log into Schulmanager. To disable Schulmanager, leave the defaults unchanged or remove the whole `schulmanager` section.
 
 * `user` The login email address
 * `pass` The login password
-
-To disable Schulmanager (and only use Eltern-Portal), leave the defaults unchanged or remove the whole `schulmanager` section.
+* `tag` A short name used to identify the school in emails
+* `recipients` This controls who receives the different categories of messages. Each takes a comma-separated list of zero or more addresses, enclosed in `[]`.
+  * `*` Receives everything (though there is currently only one category, but more may be added in later versions)
+  * `elternbriefe` Self-explanatory
 
 ### `smtp`
 
@@ -141,9 +146,7 @@ IMAP support is optional and must be turned on via `incomingEmail.enabled` in th
 
 These control the behavior of Eltern-Emailer.
 
-* `emailTo` The recipient of all emails sent by the application. Specify only the address, not the real name. This will typically be a parent's email address, or an address that forwards to both parents.
-* `emailToStudent` The student's email address (optional; may be empty). If set, information intended for the student (currently substitution plan updates and upcoming events) will additionally be sent to this address.
-* `emailFrom` The sender used for all emails sent by the application. Specify only the address, not the name. This is where bounced emails are delivered to, e.g. when the recipient's mailbox is full. It can be the same as `emailTo`, or the address of the person maintaining the Eltern-Emailer installation. Note that bounced emails contain the full content, i.e. sensitive personal information.
+* `adminAddress` The sender (From:) used for all emails sent by the application. This is where bounced emails are delivered to, e.g. when the recipient's mailbox is full. Note that bounced emails typically contain the full content, i.e. possibly sensitive personal information. Error messages are also sent to this address.
 * `incomingEmail` This groups options related to incoming email.
    * `enabled` Check the IMAP inbox specified under [`imap`](#_imap). See [Sending Messages to Teachers](#_sending-messages-to-teachers) and [Reducing Latency](#_reducing-latency).
    * `forwardingAddress` The email address of the IMAP inbox to be forwarded to teachers. This enables replying to threads with teachers by email.
