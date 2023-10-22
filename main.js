@@ -13,7 +13,7 @@ const { simpleParser } = require('mailparser');
 
 // ---------- Shared state ----------
 
-const lg = require('./logging.js'); // provides global LOG (initialized below)
+const logging = require('./logging.js'); // provides global LOG (initialized below)
 
 // Browser instance is shared across eltern-portal.org and schulmanager-online.de.
 global.BROWSER = null;
@@ -1056,7 +1056,7 @@ async function main() {
   CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
   CONFIG.imap.logger = IMAP_LOGGER; // standing orders
   CONFIG.imap.maxIdleTime ||= 60 * 1000; // 60s default
-  lg.initialize();
+  logging.initialize();
   LOG.info(TITLE);
 
   // Ensure config file has been edited.
