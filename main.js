@@ -21,6 +21,8 @@ global.CONFIG = {};
 global.INBOUND = [];
 // The ~current time (epoch millis). Set at the start of each main loop iteration.
 global.NOW = null;
+// The IMAP client. Initialized in main().
+global.IMAP_CLIENT = null;
 
 // ---------- Something like encapsulation ----------
 
@@ -67,8 +69,6 @@ let RETRY_WAIT_SECONDS = DEFAULT_RETRY_WAIT_SECONDS;
 /** Timestamp of the last error. */
 let LAST_FAILURE_EPOCH_MILLIS = 0;
 
-/** The IMAP client. */
-let IMAP_CLIENT = null;
 /** Synchronization between IMAP event listener and main loop. */
 let awake = () => {}; // Event handler may fire before the main loop builds the wait Promise.
 /** Forward IMAP logging to our own logger. */
