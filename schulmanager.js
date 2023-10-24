@@ -15,7 +15,7 @@ const TEMP_DIR = `${__dirname}${path.sep}temp${path.sep}`;
 // ---------- External constants ----------
 
 const EMPTY_STATE = {
-  letters: {} // key: "$id $subject", value: 1
+  letters: {} // key: ID (time and subject); value: 1
 };
 
 // ---------- Login ----------
