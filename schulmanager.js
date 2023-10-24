@@ -12,6 +12,14 @@ const TEMP_DIR = `${__dirname}${path.sep}temp${path.sep}`;
 // global.CONFIG (see main.js)
 // global.INBOUND (see main.js)
 
+// ---------- External constants ----------
+
+const EMPTY_STATE = {
+  letters: {} // key: "$id $subject", value: 1
+};
+
+// ---------- Login ----------
+
 async function login(page) {
   if (!CONFIG.schulmanager) {
     return;
@@ -40,6 +48,8 @@ function maybeCreateTempDir() {
   }
   fs.emptyDirSync(TEMP_DIR);
 }
+
+// ---------- Letters ----------
 
 /**
  * Expands the list of letters until the specified number of letters is shown. Specify zero to
@@ -203,4 +213,12 @@ function buildEmailsForLetters(letters, processedLetters) {
   }
 }
 
-module.exports = { login, readLetters, buildEmailsForLetters }
+// ---------- Orchestration ----------
+
+async function processSchulmanager(page, state) {
+  await login(page);
+  const letters = await readLetters(page, state.sm.letters);
+  buildEmailsForLetters(letters, state.sm.letters);
+}
+
+module.exports = { EMPTY_STATE, processSchulmanager }
