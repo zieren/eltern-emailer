@@ -385,6 +385,13 @@ function buildEmailsForInquiries(inquiries, processedInquiries) {
 
 async function readSubstitutions(page, previousHashes) {
   await page.goto(CONFIG.elternportal.url + '/service/vertretungsplan');
+  // For our school most lines are duplicated, with explicitly altering CSS for the TR. Remove these
+  // duplicates.
+  await page.$$eval('div#asam_content table.table tr', (trs) => trs.forEach(tr => {
+    if (tr.previousElementSibling && tr.previousElementSibling.innerHTML === tr.innerHTML) {
+      tr.parentElement.removeChild(tr);
+    }
+  }));
   const originalHTML = await page.$eval('div#asam_content', (div) => div.innerHTML);
   const hash = md5(originalHTML);
   if (hash === previousHashes.subs) {
