@@ -105,8 +105,12 @@ function setEmptyState(state, emptyState) {
 
 function processFlags(flags) {
   // Flags override values in config file.
-  CONFIG.elternportal.pass = flags.ep_password || CONFIG.elternportal.pass;
-  CONFIG.schulmanager.pass = flags.sm_password || CONFIG.schulmanager.pass;
+  if (elternPortalConfigured()) { // section may be absent
+    CONFIG.elternportal.pass = flags.ep_password || CONFIG.elternportal.pass;
+  }
+  if (schulmanagerConfigured()) { // section may be absent
+    CONFIG.schulmanager.pass = flags.sm_password || CONFIG.schulmanager.pass;
+  }
   CONFIG.smtp.auth.pass = flags.smtp_password || CONFIG.smtp.auth.pass;
   CONFIG.imap.auth.pass = flags.imap_password || CONFIG.imap.auth.pass;
   CONFIG.options.mute = flags.mute !== undefined ? flags.mute : CONFIG.options.mute;
