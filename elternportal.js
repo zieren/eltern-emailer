@@ -119,7 +119,7 @@ async function readAnnouncements(page) {
             .match(/(\d\d)\.(\d\d)\.(\d\d\d\d) +(\d\d:\d\d:\d\d)/);
         return {
           // Use the ID also used for reading confirmation, because it should be stable.
-          id: n.attributes.onclick.textContent.match(/\(([0-9]+)\)/)[1],
+          id: n.attributes.onclick.textContent.match(/\((\d+)\)/)[1],
           // Strip subject and date, which are in "n".
           body: n.parentElement.innerText.substring(n.innerText.length).trim(),
           subject: n.firstChild.textContent,
@@ -180,16 +180,19 @@ function buildEmailsForAnnouncements(page, announcements, processedAnnouncements
 
 // ---------- Threads ----------
 
-/** Returns a list of teachers with at least one thread. */
-async function readActiveTeachers(page) {
+// Returns a list of teachers with at least one recent thread.
+async function readActiveTeachers(page, lastSuccessfulRun) {
   await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer');
-  const teachers = await page.$$eval(
+  const teachers = (await page.$$eval(
     // New messages cause a "Neu" indicator with the same href as the teacher. The :first-child
     // selector prevents duplicates from that.
     'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]:first-child',
     (anchors) => anchors.map(
       (a) => {
-        const m = a.href.match(/.*\/([0-9]+)\/(.*)/);
+        // Time here is in 12h format but missing any am/pm indicator (sic). We just use the date to
+        // find teachers with ~recent threads.
+        const d = a.parentElement.innerText.match(/(\d\d)\.(\d\d).(\d\d\d\d)/);
+        const m = a.href.match(/.*\/(\d+)\/(.*)/);
         return {
           id: m[1],
           url: a.href,
@@ -198,17 +201,20 @@ async function readActiveTeachers(page) {
           // First" order, and some roles (e.g. director) are added after the name, separated by
           // "<br>", which is %-encoded. We strip that here, but keep the reverse order. Later on we
           // can get the name in forward order, so we use this only for logging.
-          nameForLogging: decodeURIComponent(m[2]).replace(/<.*/, '').replace(/[+_]/g, ' ')
+          nameForLogging: decodeURIComponent(m[2]).replace(/<.*/, '').replace(/[+_]/g, ' '),
+          // We add two days to the date to account for a) lacking time of day, b) timezones, and c)
+          // clock skew. There is no need to cut it close, the performance gain would not outweigh
+          // complexity.
+          latest: new Date(d[3], d[2] - 1, parseInt(d[1]) + 2).getTime()
         };
-      }));
-  LOG.info('Found %d teachers with threads', teachers.length);
+      })))
+      .filter(a => a.latest >= lastSuccessfulRun);
+  LOG.info('Found %d teachers with recent threads', teachers.length);
   return teachers;
 }
 
-/**
- * Reads metadata for all threads, based on active teachers returned by readActiveTeachers().
- * Threads are stored with key 'threads' for each teacher.
- */
+// Reads metadata for all threads, based on active teachers returned by readActiveTeachers().
+// Threads are stored with key 'threads' for each teacher.
 async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
   for (const teacher of teachers) {
     LOG.debug('Reading threads with %s', teacher.nameForLogging);
@@ -216,21 +222,18 @@ async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
     teacher.threads = (await page.$$eval(
         'a[href*="meldungen/kommunikation_fachlehrer/"]',
         (anchors) => anchors.map((a) => {
-          // We don't use the time of day because it's in 12h format and missing any am/pm
-          // indication (sic). That is ridiculous, but it's still easily good enough for caching.
+          // See matching comments in readActiveTeachers() above.
           const d = a.parentElement.previousSibling.textContent.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
           // Extract teacher name and thread ID. In our school the teacher name used here is clean
           // and in "first name first" order. First and last name are separated by '_'.
-          const m = a.href.match(/.*\/([^\/]*)\/([0-9]+)$/);
+          const m = a.href.match(/.*\/([^\/]*)\/(\d+)$/);
           return {
             id: m[2],
             url: a.href,
             // Not sure I've seen quotes or newlines; just trying to ensure an RFC2822 valid name.
             teacherName: decodeURIComponent(m[1]).replace(/[+"\n_]/g, ' '),
             subject: a.textContent,
-            // We add two days to the date to account for a) lacking time of day, b) timezones, and
-            // c) clock skew. There is no need to cut it close, the performance gain would not
-            // outweigh complexity.
+            // See matching comments in readActiveTeachers() above.
             latest: new Date(d[3], d[2] - 1, parseInt(d[1]) + 2).getTime()
           };
         })))
@@ -509,7 +512,7 @@ async function readEvents(page, previousEvents) {
   // Join the two and sort them by timestamp.
   upcomingEvents = upcomingEvents.concat(removedEvents).sort((a, b) => a.ts - b.ts);
 
-  LOG.info(`${upcomingEvents.length} upcoming event(s), `
+  LOG.info(`${upcomingEvents.length} upcoming events, `
       + `of which ${numNewEvents} new and ${numRemovedEvents} removed`);
 
       // Create emails.
@@ -547,7 +550,7 @@ async function readEvents(page, previousEvents) {
 // ---------- Outgoing messages ----------
 
 async function sendMessagesToTeachers(page) {
-  LOG.info('Sending %d message(s) to teachers', OUTBOUND.length);
+  LOG.info('Sending %d messages to teachers', OUTBOUND.length);
   // Sidenote: Curiously navigation will always succeed, even for nonexistent teacher IDs. What's
   // more, we can actually send messages that we can then retrieve by navigating to the URL
   // directly. This greatly simplifies testing :-)
@@ -611,7 +614,7 @@ async function sendMessagesToTeachers(page) {
           if (numParts > 1 && !msg.replyThreadId) {
             msg.replyThreadId = await page.$eval(
               'a[href*="meldungen/kommunikation_fachlehrer/"',
-              (a) => a.href.match(/.*\/([0-9]+)$/)[1]);
+              (a) => a.href.match(/.*\/(\d+)$/)[1]);
           }
         } else {
           throw '' + response.status() + ' ' + response.statusText();
@@ -767,7 +770,7 @@ async function processElternPortal(page, state) {
   buildEmailsForInquiries(inquiries, state.ep.inquiries);
 
   // Section "Kommunikation Eltern/Fachlehrer".
-  const teachers = await readActiveTeachers(page);
+  const teachers = await readActiveTeachers(page, state.ep.lastSuccessfulRun);
   await readThreadsMeta(page, teachers, state.ep.lastSuccessfulRun);
   await readThreadsContents(page, teachers);
   await readThreadsAttachments(page, teachers, state.ep.threads);
