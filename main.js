@@ -89,7 +89,7 @@ const IMAP_LOGGER = {
 
 // ---------- Initialization functions ----------
 
-function readConfigFile() {
+function readConfigFile(flags) {
   CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
   processFlags(flags);
   CONFIG.imap.logger = IMAP_LOGGER; // standing orders
@@ -307,7 +307,7 @@ async function main() {
   });
   const {_, flags} = parser.parse(process.argv.slice(2));
 
-  readConfigFile();
+  readConfigFile(flags);
   logging.initialize(); // as early as possible
   LOG.info(TITLE);
 
@@ -347,9 +347,16 @@ async function main() {
     NOW = Date.now();
 
     // Reread config and state within the loop to allow editing the files without restarting.
-    readConfigFile();
+    readConfigFile(flags);
     const state = readState();
-    BROWSER = await puppeteer.launch({headless: 'new'}); // prevent deprecation warning
+
+    // Launch Puppeteer. On the Raspberry Pi the browser executable is typically named
+    // "chromium-browser", which must be specified. Other Linux systems may use "chromium".
+    const puppeteerOptions = {headless: 'new'}; // prevent deprecation warning
+    if (CONFIG.options.customBrowserExecutable) {
+      puppeteerOptions.executablePath = CONFIG.options.customBrowserExecutable;
+    }
+    BROWSER = await puppeteer.launch(puppeteerOptions);
     const page = await BROWSER.newPage();
 
     // If both EP and SM are active, we process them sequentially. We catch a potential exception
@@ -444,7 +451,7 @@ async function main() {
       await sleepSeconds(10);
       exit(retval);
     } catch (e) {
-      LOG.error('Error in main loop:\n%s', e.stack || e);
+      LOG.error('Error in main loop:\n%s', (e && e.stack) || e);
     }
 
     // The main loop threw an exception. Rerun with exponential backoff. This addresses transient
