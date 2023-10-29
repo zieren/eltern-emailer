@@ -349,7 +349,14 @@ async function main() {
     // Reread config and state within the loop to allow editing the files without restarting.
     readConfigFile();
     const state = readState();
-    BROWSER = await puppeteer.launch({headless: 'new'}); // prevent deprecation warning
+
+    // Launch Puppeteer. On the Raspberry Pi the browser executable is typically named
+    // "chromium-browser", which must be specified. Other Linux systems may use "chromium".
+    const puppeteerOptions = {headless: 'new'}; // prevent deprecation warning
+    if (CONFIG.options.customBrowserExecutable) {
+      puppeteerOptions.executablePath = CONFIG.options.customBrowserExecutable;
+    }
+    BROWSER = await puppeteer.launch(puppeteerOptions);
     const page = await BROWSER.newPage();
 
     // If both EP and SM are active, we process them sequentially. We catch a potential exception

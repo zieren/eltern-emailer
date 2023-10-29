@@ -41,6 +41,7 @@
     }
   },
   "options": {
+    "customBrowserExecutable": "",
     "adminAddress": "PARENT 1 EMAIL ADDRESS",
     "incomingEmail": {
       "enabled": true,
