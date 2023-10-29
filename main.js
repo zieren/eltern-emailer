@@ -89,6 +89,15 @@ const IMAP_LOGGER = {
 
 // ---------- Initialization functions ----------
 
+function readConfigFile() {
+  CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
+  processFlags(flags);
+  CONFIG.imap.logger = IMAP_LOGGER; // standing orders
+  CONFIG.imap.maxIdleTime ||= 60 * 1000; // 60s default
+  CONFIG.options.checkIntervalMinutes = Math.max(CONFIG.options.checkIntervalMinutes, 10);
+  createIncomingEmailRegExp();
+}
+
 function readState() {
   const state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) : {};
   setEmptyState(state, EMPTY_STATE);
@@ -298,21 +307,16 @@ async function main() {
   });
   const {_, flags} = parser.parse(process.argv.slice(2));
 
-  CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
-  CONFIG.imap.logger = IMAP_LOGGER; // standing orders
-  CONFIG.imap.maxIdleTime ||= 60 * 1000; // 60s default
-  logging.initialize();
+  readConfigFile();
+  logging.initialize(); // as early as possible
   LOG.info(TITLE);
 
-  // Ensure config file has been edited.
+  // This is just a best effort check in case the user completely forgot to edit the file. We don't
+  // repeat it when we reread the file in the main loop.
   if (!elternPortalConfigured() && !schulmanagerConfigured()) {
     LOG.error('Please edit the config file to specify your login credentials, SMTP server etc.');
     return 2;
   }
-
-  CONFIG.options.checkIntervalMinutes = Math.max(CONFIG.options.checkIntervalMinutes, 10);
-  processFlags(flags);
-  createIncomingEmailRegExp();
 
   // Start IMAP listener, if enabled.
   if (CONFIG.options.incomingEmail.enabled) {
@@ -342,7 +346,8 @@ async function main() {
   while (true) {
     NOW = Date.now();
 
-    // Read state within the loop to allow editing the state file manually without restarting.
+    // Reread config and state within the loop to allow editing the files without restarting.
+    readConfigFile();
     const state = readState();
     BROWSER = await puppeteer.launch({headless: 'new'}); // prevent deprecation warning
     const page = await BROWSER.newPage();
