@@ -415,14 +415,23 @@ async function readSubstitutions(page, previousHashes) {
 
 async function readNoticeBoard(page, previousHashes) {
   await page.goto(CONFIG.elternportal.url + '/aktuelles/schwarzes_brett');
-  const currentItems = await page.$$('div.grid-item');
-  const archivedItems = await page.$$('div.well');
-  const allItems = currentItems.concat(archivedItems);
+  // We extract both current and archived items, because an item may have been published and 
+  // archived since the last run (e.g. vacation or other local downtime). To make sure hashes are
+  // stable we need to do some contortions.
+  const subjects = await page.$$eval('div.well h4', hh => hh.map(h => h.innerHTML));
+  const currentContents = await page.$$eval('div.well h4 ~ p', pp => pp.map(p => p.outerHTML));
+  const archivedContents = 
+      await page.$$eval('div.well div.row ~ div.row p', pp => pp.map(p => p.outerHTML));
+  const contents = currentContents.concat(archivedContents);
+  if (subjects.length != contents.length) {
+    throw new Error(`Found ${subjects.length} subjects, but ${contents.length} contents`);
+  }
+
   let newHashes = {};
-  for (const item of allItems) {
-    const innerHTML = await page.evaluate(item => item.innerHTML, item);
-    const subject = await item.$eval('h4', h => h.innerText);
-    const hash = md5(innerHTML);
+  for (let i = 0; i < subjects.length; ++i) {
+    const subject = subjects[i];
+    const content = contents[i];
+    const hash = md5(`${md5(subject)} ${md5(content)}`);
     if (previousHashes.notices[hash]) {
       newHashes[hash] = 1; // indicate "done"
       continue;
@@ -431,7 +440,7 @@ async function readNoticeBoard(page, previousHashes) {
     newHashes[hash] = 0; // indicate "not yet done"
     INBOUND.push({
       email: em.buildEmailEpNotices(subject, {
-        html: `<!DOCTYPE html><html><head></head><body>${innerHTML}</body></html>`
+        html: `<!DOCTYPE html><html><head></head><body>${content}</body></html>`
       }),
       ok: () => { newHashes[hash] = 1; }
     });
