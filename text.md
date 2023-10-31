@@ -195,7 +195,7 @@ You can simply configure the email account you are currently using for the websi
 
 ## Running the Application
 
-Eltern-Emailer runs in the Node.js runtime environment. It does not use the website's indication of new messages (because that is reset when you read them online, and it's also not supported for some types of content). Instead it uses a file called `state.json` to remember which content has already been emailed and detect which is new.
+Eltern-Emailer runs in the Node.js runtime environment. It does not use the website's indication of new messages (because that is reset when you read them online, and it's also not available for some types of content). Instead it uses a file called `state.json` to remember which content has already been emailed and detect which is new. This file is reread before each check, so it can be edited while the application is waiting for the next check.
 
 Initially this file does not exist and all messages and content will appear new. If you don't want to get flooded with emails on the first run, run Eltern-Emailer once with these [flags](#_flags):
 
