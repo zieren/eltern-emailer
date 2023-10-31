@@ -43,6 +43,7 @@
   "options": {
     "customBrowserExecutable": "",
     "adminAddress": "PARENT 1 EMAIL ADDRESS",
+    "useBcc": false,
     "incomingEmail": {
       "enabled": true,
       "forwardingAddress": "IMAP EMAIL ADDRESS",

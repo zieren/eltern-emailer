@@ -74,13 +74,20 @@ function buildEmailSmAnnouncements(subject, options) {
       options);
 }
 
-/** Centralizes setting of common email options. */
-function buildEmail(fromName, to, subject, options) {
-  return {...{
+// Centralizes setting of common email options.
+function buildEmail(fromName, recipients, subject, options) {
+  const email = {...{
     from: `"${fromName}" <${CONFIG.options.adminAddress}>`,
-    to: to,
     subject: subject
   }, ...options};
+  if (recipients.length > 1 && CONFIG.options.useBcc) {
+    // The To: field is not required for the message to be valid, see
+    // https://www.rfc-editor.org/rfc/rfc2822#section-3.6.3 and http://faqs.org/qa/rfcc-873.html.
+    email.bcc = recipients;
+  } else {
+    email.to = recipients;
+  }
+  return email;
 }
 
 module.exports = { 

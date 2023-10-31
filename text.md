@@ -147,6 +147,7 @@ IMAP support is optional and must be turned on via `incomingEmail.enabled` in th
 These control the behavior of Eltern-Emailer.
 
 * `adminAddress` The sender (From:) used for all emails sent by the application. This is where bounced emails are delivered to, e.g. when the recipient's mailbox is full. Note that bounced emails typically contain the full content, i.e. possibly sensitive personal information. Error messages are also sent to this address.
+* `useBcc` Use `Bcc:` instead of `To:` when sending email to multiple recipients.
 * `incomingEmail` This groups options related to incoming email.
    * `enabled` Check the IMAP inbox specified under [`imap`](#_imap). See [Sending Messages to Teachers](#_sending-messages-to-teachers) and [Reducing Latency](#_reducing-latency).
    * `forwardingAddress` The email address of the IMAP inbox to be forwarded to teachers. This enables replying to threads with teachers by email.
