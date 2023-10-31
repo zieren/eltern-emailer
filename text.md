@@ -224,6 +224,10 @@ node main.js --once
 To try it out, manually remove one line in `state.json`, e.g. the first line after `"letters":`. This should trigger an email to you on the next run.
 <a id="_flags"></a>
 
+### Terminating
+
+The `SIGTERM` signal can be used to do a graceful shutdown (which may take a few seconds).
+
 ## Flags
 
 The following flags are supported:

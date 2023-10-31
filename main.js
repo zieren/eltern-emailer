@@ -1,7 +1,6 @@
 const TITLE = 'Eltern-Emailer 0.7.1 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
     + ' See https://zieren.de/software/eltern-emailer for component license info';
 
-const { exit } = require('process');
 const fs = require('fs-extra');
 const { ImapFlow } = require('imapflow');
 const nodemailer = require('nodemailer');
@@ -56,22 +55,7 @@ const EMPTY_STATE = {
   sm: sm.EMPTY_STATE
 };
 
-// ---------- Retry throttling ----------
-
-/** Seconds to wait after a failure, assuming no recent previous failure. */
-const DEFAULT_RETRY_WAIT_SECONDS = 15;
-/** If the last failure was less than this ago, back off exponentially. */
-const BACKOFF_TRIGGER_SECONDS = 60 * 60; // 1h
-/** Maximum time to wait in exponential backoff. */
-const MAX_RETRY_WAIT_SECONDS = 60 * 60; // 1h
-/** Retry wait time for the last error. */
-let RETRY_WAIT_SECONDS = DEFAULT_RETRY_WAIT_SECONDS;
-/** Timestamp of the last error. */
-let LAST_FAILURE_EPOCH_MILLIS = 0;
-
-/** Synchronization between IMAP event listener and main loop. */
-let awake = () => {}; // Event handler may fire before the main loop builds the wait Promise.
-/** Forward IMAP logging to our own logger. */
+// Forward IMAP logging to our own logger.
 const IMAP_LOGGER = {
   debug: (o) => {}, // This is too noisy.
   info: (o) => LOG.info('IMAP: %s', JSON.stringify(o)),
@@ -86,6 +70,35 @@ const IMAP_LOGGER = {
     awake();
   } 
 };
+
+// ---------- Retry throttling ----------
+
+/** Seconds to wait after a failure, assuming no recent previous failure. */
+const DEFAULT_RETRY_WAIT_SECONDS = 15;
+/** If the last failure was less than this ago, back off exponentially. */
+const BACKOFF_TRIGGER_SECONDS = 60 * 60; // 1h
+/** Maximum time to wait in exponential backoff. */
+const MAX_RETRY_WAIT_SECONDS = 60 * 60; // 1h
+/** Retry wait time for the last error. */
+let RETRY_WAIT_SECONDS = DEFAULT_RETRY_WAIT_SECONDS;
+/** Timestamp of the last error. */
+let LAST_FAILURE_EPOCH_MILLIS = 0;
+
+// ---------- Synchronization ----------
+
+// May be called from event handlers (IMAP, SIGTERM) before the main loop builds the wait Promise.
+let awake = () => {};
+
+// Set when SIGTERM is received. Causes a graceful shutdown.
+let SIGTERM_RECEIVED = false;
+
+process.on('SIGTERM', () => {
+  SIGTERM_RECEIVED = true;
+  if (LOG) {
+    LOG.warn('Received SIGTERM, shutting down...');
+  }
+  awake();
+});
 
 // ---------- Initialization functions ----------
 
@@ -150,6 +163,17 @@ function schulmanagerConfigured() {
 
 function sleepSeconds(seconds) {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+}
+
+async function gracefulExit(retval) {
+  await disposeImapClient();
+  LOG.info('Exiting with code %d', retval);
+  // Flushing Winston's file stream is nontrivial (https://stackoverflow.com/questions/58933772). We
+  // go with the simple, readable, thoroughly ridiculous hack of just waiting a few seconds.
+  // Terminating the program is a rare event, so this seems acceptable.
+  LOG.debug('Waiting 5s for log to flush (sic)...');
+  await sleepSeconds(5);
+  process.exit(retval);
 }
 
 // ---------- Email sending ----------
@@ -344,6 +368,10 @@ async function main() {
   }
 
   while (true) {
+    if (SIGTERM_RECEIVED) {
+      return 0;
+    }
+    
     NOW = Date.now();
 
     // Reread config and state within the loop to allow editing the files without restarting.
@@ -441,16 +469,13 @@ async function main() {
     try {
       const retval = await main();
       // Normal completion means we exit.
-
-      // Flushing Winston's file stream on exit is nontrivial
-      // (https://stackoverflow.com/questions/58933772). We go with the simple, readable, thoroughly
-      // ridiculous hack of just waiting a few seconds. Terminating the program is a rare event, so
-      // this seems acceptable.
-      LOG.info('Exiting with code %d', retval);
-      LOG.debug('Waiting 10s for log to flush (sic)...');
-      await sleepSeconds(10);
-      exit(retval);
+      await gracefulExit(retval);
     } catch (e) {
+      // It seems that Puppeteer also receives SIGTERM and terminates, causing exceptions in running
+      // operations. So we may end up here instead of above.
+      if (SIGTERM_RECEIVED) {
+        await gracefulExit(0);
+      }
       LOG.error('Error in main loop:\n%s', (e && e.stack) || e);
     }
 
