@@ -104,7 +104,7 @@ Only `Elternbriefe` (messages to parents) are currently supported.
 
 ## Configuration
 
-The following sections describe the homonymous parts in the `config.json` file.
+The following sections describe the homonymous parts in the `config.json` file. The file can be edited while the application is running. However, changes to logging or IMAP related options require a restart.
 
 ### `elternportal`
 
