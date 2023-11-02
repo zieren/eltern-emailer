@@ -14,7 +14,7 @@ Eltern-Emailer is an unofficial email interface for communicating with German sc
 * **Saves time**<br>
 You see new information immediately, including attachments.
 * **Supports multiple parents**<br>
-Emails can be sent to multiple receivers via regular email forwarding. There is no issue with one parent resetting a message's `unread` status for the other parent.
+Emails can be sent to multiple receivers. There is no issue with one parent resetting a message's `unread` status for the other parent.
 * **Supports the student**<br>
 General information such as substitution plan updates and upcoming events can be sent to the student or even to other parents.
 * **Integrates with email based workflows**<br>
@@ -30,10 +30,6 @@ Primarily `*.eltern-portal.org` is supported:
 Additionally, there is limited support for `schulmanager-online.de`:
 
 * Retrieve messages ("Elternbriefe") 
-
-## Project Status
-
-This project is in beta state.
 
 ## How it Works
 
@@ -56,8 +52,10 @@ Eltern-Emailer requires the free [Node.js](https://en.wikipedia.org/wiki/Node.js
 
 * Windows
 * Linux
-<a id="_supported-sections-at-head"></a>
 
+Recent models of the Raspberry Pi are supported (tested on model 4, but model 3 should also work). See option `customBrowserExecutable` below.
+
+<a id="_supported-sections-at-head"></a>
 ### Supported Sections (at HEAD)
 
 Schools use different feature subsets. If a feature is missing for your school, let me know or, even better, contribute code.
@@ -72,11 +70,6 @@ The following sections in the web UI are supported:
 * `Klassen Vertretungsplan`
 * `Schwarzes Brett`
 * `Schulaufgaben / Weitere Termine`
-
-##### Planned Features
-
-* Send messages to "Klassenleitung".
-* Run on a Raspberry Pi.
 
 #### Schulmanager
 
@@ -94,7 +87,7 @@ Only `Elternbriefe` (messages to parents) are currently supported.
 1. Edit the file `config.json` to specify your login credentials, SMTP/IMAP servers etc. All uppercase parts in the sections you want to enable need to be replaced. If you don't want to store credentials in a file you can pass them via commandline flags (see [Flags](#_flags)). See section [Configuration](#_configuration) below for a detailed description of all options.
 
    **WARNING**
-   Keep in mind that the emails sent may contain sensitive personal information. Be sure to specify the correct `emailTo` and `emailFrom` addresses in the config file.
+   Keep in mind that the emails sent may contain sensitive personal information. Be sure to specify the correct recipient addresses in the config file.
 1. Run the application once in test mode to verify the credentials for the website and the email server:
    ```
    node main.js --test --once
@@ -146,6 +139,7 @@ IMAP support is optional and must be turned on via `incomingEmail.enabled` in th
 
 These control the behavior of Eltern-Emailer.
 
+* `customBrowserExecutable` A Chromium browser executable (full path) to use instead of the one bundled with Puppeteer. For Raspberry Pi OS (and possibly other Linuxes) this should be `chromium-browser`.
 * `adminAddress` The sender (From:) used for all emails sent by the application. This is where bounced emails are delivered to, e.g. when the recipient's mailbox is full. Note that bounced emails typically contain the full content, i.e. possibly sensitive personal information. Error messages are also sent to this address.
 * `useBcc` Use `Bcc:` instead of `To:` when sending email to multiple recipients.
 * `incomingEmail` This groups options related to incoming email.
@@ -161,7 +155,7 @@ These control the behavior of Eltern-Emailer.
 * `logLevel` The level of detail in the log file and console. These are [npm logging levels](https://github.com/winstonjs/winston#logging-levels).
 <a id="_sending-messages-to-teachers"></a>
 
-### Sending Messages to Teachers (Eltern-Portal only)
+### Sending Messages to Teachers (Eltern-Portal Only)
 
 Eltern-Emailer can receive emails from you and forward them to teachers via the website. This requires a dedicated email account accessible via IMAP (see [`imap`](#_imap) above). The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. Outlook web mail is known to work.
 
