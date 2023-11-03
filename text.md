@@ -14,7 +14,7 @@ Eltern-Emailer is an unofficial email interface for communicating with German sc
 * **Saves time**<br>
 You see new information immediately, including attachments.
 * **Supports multiple parents**<br>
-Emails can be sent to multiple receivers. There is no issue with one parent resetting a message's `unread` status for the other parent.
+Emails can be sent to multiple recipients. There is no issue with one parent resetting a message's `unread` status for the other parent.
 * **Supports the student**<br>
 General information such as substitution plan updates and upcoming events can be sent to the student or even to other parents.
 * **Integrates with email based workflows**<br>
