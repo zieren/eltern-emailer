@@ -1,4 +1,4 @@
-const TITLE = 'Eltern-Emailer 0.7.1 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.7.2 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
     + ' See https://zieren.de/software/eltern-emailer for component license info';
 
 const fs = require('fs-extra');
@@ -187,8 +187,9 @@ async function sendEmails() {
   let errors = [];
   for (let i = 0; i < INBOUND.length; ++i) {
     const e = INBOUND[i];
+    const recipients = e.email.to ? e.email.to : e.email.bcc;
     if (CONFIG.options.mute) {
-      LOG.info('Not sending email "%s" to %s', e.email.subject, e.email.to);
+      LOG.info('Not sending email "%s" to %s', e.email.subject, recipients);
       await e.ok();
       continue;
     }
@@ -197,7 +198,7 @@ async function sendEmails() {
       LOG.info('Waiting %d seconds between messages', CONFIG.options.smtpWaitSeconds);
       await sleepSeconds(CONFIG.options.smtpWaitSeconds);
     }
-    LOG.info('Sending email "%s" to %s', e.email.subject, e.email.to);
+    LOG.info('Sending email "%s" to %s', e.email.subject, recipients);
     // Wait for the callback to run.
     const ok = await new Promise((resolve) => {
       transport.sendMail(e.email, (error, info) => {
