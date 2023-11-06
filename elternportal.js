@@ -395,17 +395,17 @@ async function readSubstitutions(page, previousHashes) {
       tr.parentElement.removeChild(tr);
     }
   }));
-  const originalHTML = await page.$eval('div#asam_content', (div) => div.innerHTML);
-  const hash = md5(originalHTML);
+  const contentHTML = await page.$eval('div#asam_content', (div) => div.innerHTML);
+  const hash = md5(contentHTML);
   if (hash === previousHashes.subs) {
     return;
   }
 
-  const modifiedHTML = '<!DOCTYPE html><html><head><title>Vertretungsplan</title>'
+  const fullHTML = '<!DOCTYPE html><html><head><title>Vertretungsplan</title>'
       + '<style>table, td { border: 1px solid; } img { display: none; }</style></head>'
-      + '<body>' + originalHTML + '</body></html>';
+      + '<body>' + contentHTML + '</body></html>';
   INBOUND.push({
-    email: em.buildEmailEpSubstitutions({html: modifiedHTML}),
+    email: em.buildEmailEpSubstitutions({html: fullHTML}),
     ok: () => { previousHashes.subs = hash; }
   });
   LOG.info('Found substitution plan update');
