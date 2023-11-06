@@ -31,7 +31,7 @@ const EMPTY_STATE = {
 const INQUIRY_AUTHOR = ['Eltern', 'Klassenleitung', 'UNKNOWN'];
 
 // Status of events and their (partial) HTML representation.
-const STATUS_TO_HTML = {
+const TR_AND_STATUS = {
   '-1': '<tr class="removed"><td>--', // removed (a rare but relevant case)
   '0': '<tr><td>',  // previously notified
   '1': '<tr class="new"><td>*', // added
@@ -464,10 +464,10 @@ async function readEventsInternal(page) {
       // Remove year because it's obvious, and use non-breaking hyphen to keep date and time on a
       // single line for better readability.
       const compactDateTime = (s) => s.replace(/( |20\d\d)/g, '').replace(/-/g, '&#8209;');
-      const html = 
-          '<td>' + compactDateTime(td.textContent)
-          + '</td><td>&nbsp;' + compactDateTime(td.nextSibling.textContent)
-          + '</td><td>' + td.nextSibling.nextSibling.textContent + '</td>';
+      const html =
+          `<td>${compactDateTime(td.textContent)}</td>` +
+          `<td>&nbsp;${compactDateTime(td.nextSibling.textContent)}</td>` +
+          `<td>${td.nextSibling.nextSibling.innerHTML}</td>`;
       return {
         ts: ts, 
         html: html
@@ -477,7 +477,7 @@ async function readEventsInternal(page) {
   events.filter(e => !e.ts).forEach(e => {
     e.ts = NOW; // Assume the event is imminent, just to be safe.
     // We only have the HTML here, but this case should be very rare.
-    LOG.error('Failed to parse date: "%s"', e.html);
+    LOG.error(`Failed to parse date: "${e.html}"`);
   });
   return events;
 }
@@ -495,9 +495,9 @@ async function readEvents(page, previousEvents) {
       .forEach(([html, _]) => delete previousEvents[html])
 
   // Read all exams and events.
-  await page.goto(CONFIG.elternportal.url + '/service/termine/liste/schulaufgaben');
+  await page.goto(`${CONFIG.elternportal.url}/service/termine/liste/schulaufgaben`);
   let events = await readEventsInternal(page);
-  await page.goto(CONFIG.elternportal.url + '/service/termine/liste/allgemein');
+  await page.goto(`${CONFIG.elternportal.url}/service/termine/liste/allgemein`);
   events = events.concat(await readEventsInternal(page));
 
   // Filter those within the lookahead range and not yet processed.
@@ -528,17 +528,19 @@ async function readEvents(page, previousEvents) {
   if (!(numNewEvents + numRemovedEvents)) {
     return;
   }
-  let emailHTML = '<!DOCTYPE html><html><head><title>Bevorstehende Termine</title>'
-      + '<style>'
-      + 'table { border-collapse: collapse; } '
-      + 'tr { border-bottom: 1pt solid; } '
-      + 'tr.new { font-weight: bold; } '
-      + 'tr.removed { text-decoration: line-through; } '
-      + '</style>'
-      + '</head><body><h2>Termine in den n&auml;chsten ' + CONFIG.options.eventLookaheadDays
-      + ' Tagen</h2><table>';
-  upcomingEvents.forEach(e => emailHTML += STATUS_TO_HTML[e.status] + '</td>' + e.html + '</tr>');
-  emailHTML += '</table></body></html>';
+  let emailHTML = `<!DOCTYPE html><html><head><title>Bevorstehende Termine</title>
+      <style>
+      table { border-collapse: collapse; }
+      tr { border-bottom: 1pt solid; }
+      tr.new { font-weight: bold; }
+      tr.removed { text-decoration: line-through; }
+      </style>
+      </head>
+      <body>
+      <h2>Termine in den n&auml;chsten ${CONFIG.options.eventLookaheadDays} Tagen</h2>
+      <table>`;
+  upcomingEvents.forEach(e => emailHTML += `\n${TR_AND_STATUS[e.status]}</td>${e.html}</tr>`);
+  emailHTML += '\n</table></body></html>';
 
   const okHandler = function() {
     // Update state of previous (announced) events when all emails are sent.
