@@ -132,12 +132,12 @@ DoTheThing(forceMessage = true) {
 
   message := ""
   epStale := EP_STALE_MINUTES > 0 && epSeconds > 60 * EP_STALE_MINUTES
-  if (epStale || forceMessage) {
+  if (epStale || (forceMessage && EP_STALE_MINUTES > 0)) {
     hhmmss := FormatSeconds(epSeconds)
     message := message "Eltern-Portal: Last successful login was " hhmmss " ago"
   }
   smStale := SM_STALE_MINUTES > 0 && smSeconds > 60 * SM_STALE_MINUTES
-  if (smStale || forceMessage) {
+  if (smStale || (forceMessage && SM_STALE_MINUTES > 0)) {
     if (message) {
       message := message "`n"
     }
