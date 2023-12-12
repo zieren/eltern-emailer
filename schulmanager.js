@@ -39,6 +39,7 @@ async function login(page) {
     throw 'Login Schulmanager failed';
   }
   LOG.info('Login Schulmanager OK');
+  global.SM_LAST_SUCCESSFUL_LOGIN = Date.now();
 }
 
 function maybeCreateTempDir() {

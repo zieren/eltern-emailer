@@ -52,6 +52,7 @@
     "eventLookaheadDays": 7,
     "checkIntervalMinutes": 30,
     "smtpWaitSeconds": 5,
+    "statusServerPort": 1984,
     "logLevel": "debug",
     "once": false,
     "mute": false,

@@ -1,7 +1,8 @@
-const TITLE = 'Eltern-Emailer 0.7.2 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
+const TITLE = 'Eltern-Emailer 0.8.0 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
     + ' See https://zieren.de/software/eltern-emailer for component license info';
 
 const fs = require('fs-extra');
+const http = require('http');
 const { ImapFlow } = require('imapflow');
 const nodemailer = require('nodemailer');
 const puppeteer = require('puppeteer');
@@ -22,6 +23,9 @@ global.INBOUND = [];
 global.NOW = null;
 // The IMAP client. Initialized in main().
 global.IMAP_CLIENT = null;
+// Last successful login timestamps. Note that these values persist across internal restarts. ö VERIFY
+global.EP_LAST_SUCCESSFUL_LOGIN = 0;
+global.SM_LAST_SUCCESSFUL_LOGIN = 0;
 
 // ---------- Something like encapsulation ----------
 
@@ -100,7 +104,29 @@ process.on('SIGTERM', () => {
   awake();
 });
 
+// ---------- Status server ----------
+
+// Can be used to monitor the application.
+let STATUS_SERVER = null;
+
 // ---------- Initialization functions ----------
+
+async function startWebServer() {
+  if (STATUS_SERVER) {
+    LOG.info(`Shutting down status server...`);
+    await new Promise((resolve) => STATUS_SERVER.close(resolve()));
+  }
+  STATUS_SERVER = http.createServer((_, res) => {
+    res.setHeader('Content-Type', 'text/plain');
+    res.write(`${EP_LAST_SUCCESSFUL_LOGIN}\n${SM_LAST_SUCCESSFUL_LOGIN}`);
+    res.end();
+  });
+
+  const port = CONFIG.options.statusServerPort;
+  STATUS_SERVER.listen(port, () => {
+    LOG.info(`Status server listening on port ${port}`);
+  });
+}
 
 function readConfigFile(flags) {
   CONFIG = JSON.parse(fs.readFileSync(flags.config, 'utf-8'));
@@ -335,6 +361,8 @@ async function main() {
   readConfigFile(flags);
   logging.initialize(); // as early as possible
   LOG.info(TITLE);
+
+  await startWebServer();
 
   // This is just a best effort check in case the user completely forgot to edit the file. We don't
   // repeat it when we reread the file in the main loop.

@@ -93,6 +93,7 @@ async function loginElternPortal(page) {
     throw 'Login Eltern-Portal failed';
   }
   LOG.info('Login Eltern-Portal OK');
+  global.EP_LAST_SUCCESSFUL_LOGIN = Date.now();
 }
 
 // TODO: Store this globally to avoid calling it multiple times?
