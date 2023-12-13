@@ -111,22 +111,35 @@ return
 ; --------------- Check ---------------
 
 DoTheThing(forceMessage = true) {
-  try {
-    http := ComObjCreate("WinHTTP.WinHTTPRequest.5.1")
-    http.Open("GET", SERVER_URL, false)
+  exception := ""
+  responseLines := []
+  ; When waking up from OS sleep, requests may fail. We retry 3x over 10s in the hope that
+  ; that's enough time to wake up and be online again.
+  Loop, 3 {
+    if (A_Index > 1) {
+      Sleep, 5 * 1000
+    }
+    try {
+      request := ComObjCreate("WinHTTP.WinHTTPRequest.5.1")
+      request.Open("GET", SERVER_URL, false)
 
-    ; We really really want no caching.
-    http.SetRequestHeader("Cache-Control", "no-cache, no-store, must-revalidate")
-    http.SetRequestHeader("Pragma", "no-cache")
-    http.SetRequestHeader("Expires", "0")
-
-    http.Send()
-  } catch exception {
+      ; We really really want no caching.
+      request.SetRequestHeader("Cache-Control", "no-cache, no-store, must-revalidate")
+      request.SetRequestHeader("Pragma", "no-cache")
+      request.SetRequestHeader("Expires", "0")
+      request.Send()
+      responseLines := StrSplit(request.ResponseText, "`n")
+      break
+    } catch e {
+      ; Last exception wins, because earlier ones are more likely to be transient.
+      exception := e
+    }
+  }
+  if (responseLines.Length() != 2) {
     MsgBox,, %APP_NAME% - ERROR, % "Server unreachable:`n`n" ExceptionToString(exception)
     return
   }
 
-  responseLines := StrSplit(http.ResponseText, "`n")
   epSeconds := GetSecondsElapsed(responseLines[1])
   smSeconds := GetSecondsElapsed(responseLines[2])
 
