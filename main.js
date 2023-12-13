@@ -23,7 +23,7 @@ global.INBOUND = [];
 global.NOW = null;
 // The IMAP client. Initialized in main().
 global.IMAP_CLIENT = null;
-// Last successful login timestamps. Note that these values persist across internal restarts. ö VERIFY
+// Last successful login timestamps. Note that these values persist across internal restarts.
 global.EP_LAST_SUCCESSFUL_LOGIN = 0;
 global.SM_LAST_SUCCESSFUL_LOGIN = 0;
 
