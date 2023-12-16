@@ -21,7 +21,7 @@ const EMPTY_STATE = {
   inquiries: {}, // key: thread index; value: number of msgs processed (oldest first)
   events: {}, // key: event description (needed when event is *removed*); value: timestamp
   hashes: {
-    subs: '', // latest substitution plan hash
+    substitutions: {}, // key: hash for one day's plan, value: 1
     notices: {} // key: notice hash; value: 1 (or 0 if email failed)
   }
 };
@@ -391,23 +391,59 @@ async function readSubstitutions(page, previousHashes) {
   await page.goto(CONFIG.elternportal.url + '/service/vertretungsplan');
   // For our school most lines are duplicated, with explicitly altering CSS for the TR. Remove these
   // duplicates.
-  await page.$$eval('div#asam_content table.table tr', (trs) => trs.forEach(tr => {
+  await page.$$eval('div#asam_content div.main_center table.table tr', (trs) => trs.forEach(tr => {
     if (tr.previousElementSibling && tr.previousElementSibling.innerHTML === tr.innerHTML) {
       tr.parentElement.removeChild(tr);
     }
   }));
-  const contentHTML = await page.$eval('div#asam_content', (div) => div.innerHTML);
-  const hash = md5(contentHTML);
-  if (hash === previousHashes.subs) {
+  // We use a day granularity to handle the case where a day disappears because it's past.
+  const substitutions = await page.$$eval(
+      'div#asam_content div.main_center div.list.bold', // find headings
+      divs => divs.map(div => {
+        const m = div.innerText.match(/\b(\d\d?)\.(\d\d?)\.(\d\d(\d\d)?)\b/);
+        const table = div.nextElementSibling; // actual substitution table
+        if (!m || table.nodeName !== 'TABLE' || !table.classList.contains("table")) {
+          throw new Error('Unexpected substitution plan format');
+        }
+        // Expiration is beginning of next (+1) day (this works across months). We can't use
+        // global.NOW in page context.
+        const expired = Date.now() >= new Date(m[3], m[2] - 1, m[1] + 1).getTime();
+        // There is no value in sending an empty plan. ISTM our school has a lookahead of two days,
+        // so at midnight a new day appears. AFAICT that day is always empty, maybe because the
+        // secretary needs to approve the plan manually.
+        const empty = table.rows.length <= 1;
+        return  expired || empty
+          ? null // filtered below
+          : { html: `${div.outerHTML}\n${table.outerHTML}\n` };
+      }).filter(s => s !== null));
+  let newHashes = {};
+  let haveUpdates = false;
+  substitutions.forEach(sub => {
+    const hash = md5(sub.html);
+    newHashes[hash] = 1;
+    sub.updated = !(hash in previousHashes.substitutions);
+    haveUpdates ||= sub.updated;
+  });
+  if (!haveUpdates) {
+    previousHashes.substitutions = newHashes;
     return;
   }
-
-  const fullHTML = '<!DOCTYPE html><html><head><title>Vertretungsplan</title>'
-      + '<style>table, td { border: 1px solid; } img { display: none; }</style></head>'
-      + '<body>' + contentHTML + '</body></html>';
+  let contentHTML = 
+      await page.$eval('div#asam_content table.table_header', table => table.outerHTML);
+  substitutions.forEach(sub => {
+    const html = sub.updated ? `<span class="updated">*&nbsp;${sub.html}</span>` : sub.html;
+    contentHTML += html;
+  });
+  const fullHTML = `<!DOCTYPE html><html><head><title>Vertretungsplan</title>
+      <style>
+        table, td { border: 1px solid; } 
+        img { display: none; }
+        span.updated div.list { font-weight: bold; display: inline; }
+      </style></head>
+      <body>${contentHTML}</body></html>`;
   INBOUND.push({
     email: em.buildEmailEpSubstitutions({html: fullHTML}),
-    ok: () => { previousHashes.subs = hash; }
+    ok: () => { previousHashes.substitutions = newHashes; }
   });
   LOG.info('Found substitution plan update');
 }
