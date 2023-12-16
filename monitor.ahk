@@ -17,7 +17,7 @@ Menu, Tray, Tip, % APP_NAME
 Menu, Tray, Icon, icon.png,, 1 ; 1=freeze icon (don't use default icons)
 Loop {
   DoTheThing(false)
-  Sleep % 60 * 1000 ; check every minute
+  Sleep % 1000 * 60 * 10 ; check every 10 minutes
 }
 
 ; --------------- Helpers ---------------
