@@ -412,7 +412,7 @@ async function readSubstitutions(page, previousHashes) {
         // so at midnight a new day appears. AFAICT that day is always empty, maybe because the
         // secretary needs to approve the plan manually.
         const empty = table.rows.length <= 1;
-        return  expired || empty
+        return expired || empty
           ? null // filtered below
           : { html: `${div.outerHTML}\n${table.outerHTML}\n` };
       }).filter(s => s !== null));
@@ -428,12 +428,14 @@ async function readSubstitutions(page, previousHashes) {
     previousHashes.substitutions = newHashes;
     return;
   }
-  let contentHTML = 
+  let contentHTML = // Start with the heading (school class etc.).
       await page.$eval('div#asam_content table.table_header', table => table.outerHTML);
-  substitutions.forEach(sub => {
+  substitutions.forEach(sub => { // Add all days (empty days were omitted above), marking updates.
     const html = sub.updated ? `<span class="updated">*&nbsp;${sub.html}</span>` : sub.html;
     contentHTML += html;
   });
+  contentHTML += // Append last updated time. Only needed when there actually are updates.
+      await page.$eval('div#asam_content div.main_center > div:last-of-type', div => div.outerHTML);
   const fullHTML = `<!DOCTYPE html><html><head><title>Vertretungsplan</title>
       <style>
         table, td { border: 1px solid; } 
