@@ -78,7 +78,7 @@ async function downloadFile(file, options) {
 
 // ---------- Login ----------
 
-/** This function does the thing. The login thing. You know? */
+// This function does the thing. The login thing. You know?
 async function loginElternPortal(page) {
   await page.goto(CONFIG.elternportal.url);
   await page.type('#inputEmail', CONFIG.elternportal.user);
@@ -96,7 +96,7 @@ async function loginElternPortal(page) {
   global.EP_LAST_SUCCESSFUL_LOGIN = Date.now();
 }
 
-// TODO: Store this globally to avoid calling it multiple times?
+// Called lazily to authenticate file requests (attachments).
 async function getPhpSessionIdAsCookie(page) {
   const cookies = await page.cookies();
   const id = cookies.filter(c => c.name === 'PHPSESSID');
