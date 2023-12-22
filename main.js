@@ -116,13 +116,16 @@ async function startWebServer() {
     LOG.info(`Shutting down status server...`);
     await new Promise((resolve) => STATUS_SERVER.close(resolve()));
   }
+  const port = CONFIG.options.statusServerPort;
+  if (!port) {
+    return;
+  }
   STATUS_SERVER = http.createServer((_, res) => {
     res.setHeader('Content-Type', 'text/plain');
     res.write(`${EP_LAST_SUCCESSFUL_LOGIN}\n${SM_LAST_SUCCESSFUL_LOGIN}`);
     res.end();
   });
 
-  const port = CONFIG.options.statusServerPort;
   STATUS_SERVER.listen(port, () => {
     LOG.info(`Status server listening on port ${port}`);
   });
@@ -214,8 +217,8 @@ async function sendEmails() {
   for (let i = 0; i < INBOUND.length; ++i) {
     const e = INBOUND[i];
     const recipients = e.email.to ? e.email.to : e.email.bcc;
-    if (CONFIG.options.mute) {
-      LOG.info('Not sending email "%s" to %s', e.email.subject, recipients);
+    if (CONFIG.options.mute || !recipients.length) {
+      LOG.info('Skipping email "%s" to %s', e.email.subject, recipients);
       await e.ok();
       continue;
     }
