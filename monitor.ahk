@@ -11,7 +11,7 @@ IniRead, SM_STALE_MINUTES, %INI_FILE%, schulmanager, max_stale_minutes, 60
 Menu, Tray, NoStandard
 Menu, Tray, Add, Check &Now, DoTheThing
 Menu, Tray, Add, &Pause, PauseMonitoring
-Menu, Tray, Add, &Configure, ShowConfigForm
+Menu, Tray, Add, &Configuration, ShowConfigForm
 Menu, Tray, Add, &Exit, ExitMonitoring
 Menu, Tray, Tip, % APP_NAME
 Menu, Tray, Icon, icon.png,, 1 ; 1=freeze icon (don't use default icons)
