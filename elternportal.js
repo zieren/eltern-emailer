@@ -245,8 +245,9 @@ async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
 /** Populates threads with contents, i.e. individual messages. */
 async function readThreadsContents(page, teachers) {
   for (const teacher of teachers) {
-    // TODO: Reverse this so we send in chronological order. We can simply sort numerically by
-    // thread ID.
+    // Handle threads in chronological order by sorting by thread ID, which we assume is strictly
+    // increasing.
+    teacher.threads.sort((t1, t2) => t1.id - t2.id);
     for (const thread of teacher.threads) {
       await page.goto(thread.url + '?load_all=1'); // Prevent pagination (I hope).
       thread.messages = await page.$eval('div#last_messages',
