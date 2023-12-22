@@ -44,7 +44,7 @@ It then sends these messages and updates to you via email.
 
 Optionally, it also checks a dedicated IMAP inbox for emails from you and forwards them to the intended teacher. This allows you to communicate with any teacher entirely via email.
 
-The application does not interact with any third parties except your email provider. It runs on your own desktop or server.
+The application does not interact with any third parties except your email provider. It runs on your own desktop or server. A simple tool is included to monitor the server's status and alert in case of basic issues.
 
 ### Requirements
 
@@ -54,6 +54,8 @@ Eltern-Emailer requires the free [Node.js](https://en.wikipedia.org/wiki/Node.js
 * Linux
 
 Recent models of the Raspberry Pi are supported (tested on model 4, but model 3 should also work). See option `customBrowserExecutable` below.
+
+The server monitor is an [AutoHotkey](https://www.autohotkey.com/) script, i.e. it runs on Windows.
 
 <a id="_supported-sections-at-head"></a>
 ### Supported Sections (at HEAD)
@@ -93,6 +95,7 @@ Only `Elternbriefe` (messages to parents) are currently supported.
    node main.js --test --once
    ```
    This will send a test email to the `adminAddress` specified under `options`. The message only says how many emails would have been sent in normal mode.
+1. If you are running Eltern-Emailer on a remote server (Linux or Windows) and using Windows on your desktop, you may want to install [AutoHotkey](https://www.autohotkey.com/) and use the `monitor.ahk` script to monitor the server's status. Open `Configuration` from the tray icon menu to specify the monitoring parameters, allowing a staleness of more than `checkIntervalMinutes` (see [Configuration: options](#_options)).
 <a id="_configuration"></a>
 
 ## Configuration
@@ -149,6 +152,7 @@ These control the behavior of Eltern-Emailer.
 * `eventLookaheadDays` For notification of upcoming events. This controls how long in advance you (and possibly the student, see `emailToStudent`) are notified. Each event triggers only one notification, so e.g. 14 means you are notified two weeks in advance and have to keep it in mind from then on.
 * `checkIntervalMinutes` How frequently the Eltern-Portal website is checked for new content. This determines the maximum latency emails sent by Eltern-Emailer have relative to the content becoming visible online. Please keep this value at the default of 30 minutes (or higher) to limit traffic to the site.
 * `smtpWaitSeconds` Time to wait between sending emails. SMTP servers typically reject messages when they are enqueued too quickly.
+* `statusServerPort` Local port to use for the status monitoring server (zero to disable).
 * `once` Run only once and terminate. By default the application keeps running, rechecking every `checkIntervalMinutes`.
 * `mute` Don't actually send emails, but update state. The next run will consider all messages sent. Useful to avoid email flood on first run.
 * `test` Only send test emails, as described in [Installation](#_installation) above.
@@ -245,6 +249,7 @@ Eltern-Emailer uses the following components:
 
 * [Puppeteer](https://github.com/puppeteer/puppeteer) for automated browsing (&copy; Google Inc., Apache-2.0 license)
 * [Nodemailer](https://github.com/nodemailer/nodemailer), [imapflow](https://github.com/postalsys/imapflow) and [mailparser](https://github.com/nodemailer/mailparser) for sending/receiving/parsing email (MIT and custom licenses)
+* [AutoHotkey](https://www.autohotkey.com/) for the monitoring tool (GNU GPLv2)
 * [winston](https://github.com/winstonjs/winston) for logging (MIT license)
 * [fs-extra](https://github.com/jprichardson/node-fs-extra) for file system utilities (MIT license)
 * [args-and-flags](https://github.com/sethvincent/args-and-flags) for commandline flags (ISC license)
