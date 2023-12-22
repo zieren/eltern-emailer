@@ -111,7 +111,7 @@ let STATUS_SERVER = null;
 
 // ---------- Initialization functions ----------
 
-async function startWebServer() {
+async function startStatusServer() {
   if (STATUS_SERVER) {
     LOG.info(`Shutting down status server...`);
     await new Promise((resolve) => STATUS_SERVER.close(resolve()));
@@ -365,7 +365,7 @@ async function main() {
   logging.initialize(); // as early as possible
   LOG.info(TITLE);
 
-  await startWebServer();
+  await startStatusServer();
 
   // This is just a best effort check in case the user completely forgot to edit the file. We don't
   // repeat it when we reread the file in the main loop.
