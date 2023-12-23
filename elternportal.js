@@ -252,12 +252,13 @@ async function readThreadsContents(page, teachers) {
       await page.goto(thread.url + '?load_all=1'); // Prevent pagination (I hope).
       thread.messages = await page.$eval('div#last_messages',
           (div) => Array.from(div.children).map(row => {
-            // TODO: Document that this is for attachments. Rename "url" below, and handle mutliple.
-            const a = row.querySelector('a.link_nachrichten');
+            // I believe we can have multiple attachments, but I found no occurrence to verify.
+            const attachments = Array.from(row.querySelectorAll('a.link_nachrichten'))
+                .map(a => { return { url: a.href };});
             return {
               author: !!row.querySelector('label span.link_buchungen'), // resolved below
               body: row.querySelector('div div.form-control').textContent,
-              url: a ? a.href : null
+              attachments: attachments
             };
           }));
       // We can't access "teacher" from Puppeteer, so set "author" here.
@@ -277,12 +278,11 @@ async function readThreadsAttachments(page, teachers, processedThreads) {
     for (const thread of teacher.threads) {
       for (let i = 0; i < thread.messages.length; ++i) {
         if (!(thread.id in processedThreads) || !(i in processedThreads[thread.id])) {
-          if (thread.messages[i].url) {
-            const msg = thread.messages[i];
-            options ||= {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
-            await downloadFile(msg, options);
-            LOG.info('Read attachment (%d kb) from "%s" in "%s"',
-                msg.content.length >> 10, msg.author, thread.subject);
+          for (const file of thread.messages[i].attachments) {
+            options ||= { headers: { 'Cookie': await getPhpSessionIdAsCookie(page) } };
+            await downloadFile(file, options);
+            LOG.info('Read attachment (%d kb) from "%s" in "%s"', // only teachers can attach files
+                file.content.length >> 10, teacher.nameForLogging, thread.subject);
           }
         }
       }
@@ -302,19 +302,14 @@ function buildEmailsForThreads(teachers, processedThreads) {
           const msg = thread.messages[i];
           // The thread ID seems to be globally unique. Including the teacher ID simplifies posting
           // replies, because the mail client will put this ID in the In-Reply-To header.
-          const messageIdBase = 'thread-' + teacher.id + '-' + thread.id + '-';
+          const messageIdBase = `thread-${teacher.id}-${thread.id}-`;
           const email = em.buildEmailEpThreads(msg.author, thread.subject, {
             messageId: em.buildMessageId(messageIdBase + i),
             text: msg.body
           });
-          if (msg.content) {
-            email.attachments = [
-              {
-                filename: msg.filename,
-                content: msg.content
-              }
-            ];
-          }
+          email.attachments = msg.attachments.map(a => {
+            return { filename: a.filename, content: a.content };
+          })
           if (i > 0) {
             email.references = [em.buildMessageId(messageIdBase + (i - 1))];
           }
