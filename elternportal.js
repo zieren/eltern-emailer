@@ -18,7 +18,7 @@ const EMPTY_STATE = {
   lastSuccessfulRun: 0, // Last successful run (epoch millis). Older data can be skipped.
   threads: {}, // key: thread ID; value: { key: msg index; value: 1 }
   announcements: {}, // key: announcement ID; value: 1
-  inquiries: {}, // key: thread index; value: number of msgs processed (oldest first)
+  inquiries: {}, // key: hash from message subject, date and content; value: 1
   events: {}, // key: event description (needed when event is *removed*); value: timestamp
   hashes: {
     substitutions: {}, // key: hash for one day's plan, value: 1
@@ -333,52 +333,59 @@ function buildEmailsForThreads(teachers, processedThreads) {
 
 // ---------- Inquiries ----------
 
-/** Reads messages to/from "Klassenleitung". */
+// Reads messages to/from "Klassenleitung". Returns an array of the below metadata.
 async function readInquiries(page) {
   await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation');
-  const inquiries = await page.$$eval(
+  const inquiries = Array.from(await page.$$eval(
     'div.panel', (panels) => panels.map(p => {
+      const titleRaw = p.querySelector('h3.panel-title').textContent.trim()
+      const m = titleRaw.match(/(.*?)(?:\(Beantwortet\))?\s+((\d\d)\.(\d\d)\.(\d\d\d\d))/);
+      if (!m) {
+        throw new Error(`Failed to parse inquiry "${titleRaw}"`);
+      }
       return {
-        subject: p.querySelector('h3.panel-title')
-            .textContent.trim().replace(/\(Beantwortet\) (?=\d\d\.\d\d\.\d\d\d\d)/, ''),
+        subject: m[1].trim(),
+        date: new Date(m[5], m[4] - 1, m[3]).getTime(),
+        // AFAICT this is always either one or two messages.
         messages: Array.from(p.querySelector('div.panel-body').childNodes)
             .filter(n => n.nodeName === '#text').map(n => n.textContent)
       };
-    }));
+    }))).filter(i => i !== null);
   LOG.info('Found %d inquiries', inquiries.length);
   // Order is reverse chronological, make it forward.
   return inquiries.reverse();
 }
 
-function buildEmailsForInquiries(inquiries, processedInquiries) {
-  for (const [i, inquiry] of Object.entries(inquiries)) {
-    if (!(i in processedInquiries)) {
-      // This indicates the next index to process.
-      processedInquiries[i] = 0;
-    }
-    for (let j = processedInquiries[i]; j < inquiry.messages.length; ++j) {
-      // AFAICT each thread has at most two messages.
+function buildEmailsForInquiries(inquiries, state) {
+  let prunedHashes = {};
+  for (const inquiry of inquiries) {
+    let previousHash = null;
+    for (const [j, message] of Object.entries(inquiry.messages)) {
+      const hash = md5(`${inquiry.subject}\n${inquiry.date}\n${message}`);
+      prunedHashes[hash] = 1;
+      if (state.inquiries[hash]) {
+        previousHash = hash;
+        continue;
+      }
       const email = em.buildEmailEpThreads(
           INQUIRY_AUTHOR[Math.min(j, 2)],
           inquiry.subject,
-          { // TODO: Consider enriching this, see TODO for other messageId (#4).
-            messageId: em.buildMessageId('inquiry-' + i + '-' + j),
-            // TODO: ^^ What if these are cleared after the school year, and indexes start at 0 again?
-            // Maybe include a hash of the subject, or the date, to avoid collisions.
-            text: inquiry.messages[j]
+          {
+            messageId: em.buildMessageId(`inquiry-${hash}`),
+            text: message,
+            date: new Date(inquiry.date)
           });
-      if (j > 0) {
-        email.references = [em.buildMessageId('inquiry-' + i + '-' + (j - 1))];
+      if (previousHash) {
+        email.references = [em.buildMessageId(`inquiry-${previousHash}`)];
       }
+      previousHash = hash;
       INBOUND.push({
-        // We don't forge the date here because time of day is not available. It would be confusing
-        // to have all messages written on the same day show up at "00:00".
         email: email,
-        ok: () => { processedInquiries[i] = j + 1; }
-        // TODO: This relies on execution order. Fix it to match handling of threads.
+        ok: () => { state.inquiries[hash] = 1; }
       });
     }
   }
+  state.inquiries = prunedHashes;
 }
 
 // ---------- Substitutions ----------
@@ -813,7 +820,7 @@ async function processElternPortal(page, state) {
 
   // Section "Kommunikation Eltern/Klassenleitung".
   const inquiries = await readInquiries(page);
-  buildEmailsForInquiries(inquiries, state.ep.inquiries);
+  buildEmailsForInquiries(inquiries, state.ep);
 
   // Section "Kommunikation Eltern/Fachlehrer".
   const teachers = await readActiveTeachers(page, state.ep.lastSuccessfulRun);
