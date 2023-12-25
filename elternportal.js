@@ -335,22 +335,37 @@ function buildEmailsForThreads(teachers, processedThreads) {
 
 // Reads messages to/from "Klassenleitung". Returns an array of the below metadata.
 async function readInquiries(page) {
+  // AFAICT inquiries always have either one or two messages; we rely on that below.
   await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation');
   const inquiries = Array.from(await page.$$eval(
     'div.panel', (panels) => panels.map(p => {
-      const titleRaw = p.querySelector('h3.panel-title').textContent.trim()
-      const m = titleRaw.match(/(.*?)(?:\(Beantwortet\))?\s+((\d\d)\.(\d\d)\.(\d\d\d\d))/);
-      if (!m) {
-        throw new Error(`Failed to parse inquiry "${titleRaw}"`);
+      // Message texts may be absent, making parsing a bit more complex.
+      const titleRaw = p.querySelector('h3.panel-title').innerText.trim();
+      const t = titleRaw.match(/(.*?)(?:\(Beantwortet\))?\s+(\d\d)\.(\d\d)\.(\d\d\d\d)/);
+      const request = { text: '', date: new Date(t[4], t[3] - 1, t[2]).getTime() };
+      const response = { text: '', date: null };
+      const nodes = p.querySelector('div.panel-body').childNodes;
+      for (const n of nodes) {
+        if (n.nodeName === '#text') {
+          if (!response.date) { // The response date span comes first.
+            request.text = n.textContent.trim();
+          } else {
+            response.text = n.textContent.trim();
+          }
+        } else if (n.nodeName === 'SPAN' && n.classList.contains('pull-right')) {
+          d = n.innerText.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
+          response.date = new Date(d[3], d[2] - 1, d[1]).getTime();
+        }
+      }
+      let messages = [ request ];
+      if (response.date) {
+        messages.push(response);
       }
       return {
-        subject: m[1].trim(),
-        date: new Date(m[5], m[4] - 1, m[3]).getTime(),
-        // AFAICT this is always either one or two messages.
-        messages: Array.from(p.querySelector('div.panel-body').childNodes)
-            .filter(n => n.nodeName === '#text').map(n => n.textContent)
+        subject: t[1].trim(),
+        messages: messages
       };
-    }))).filter(i => i !== null);
+    })));
   LOG.info('Found %d inquiries', inquiries.length);
   // Order is reverse chronological, make it forward.
   return inquiries.reverse();
@@ -361,28 +376,26 @@ function buildEmailsForInquiries(inquiries, state) {
   for (const inquiry of inquiries) {
     let previousHash = null;
     for (const [j, message] of Object.entries(inquiry.messages)) {
-      const hash = md5(`${inquiry.subject}\n${inquiry.date}\n${message}`);
+      const hash = md5(`${inquiry.subject}\n${message.date}\n${message.text}`);
       prunedHashes[hash] = 1;
-      if (state.inquiries[hash]) {
-        previousHash = hash;
-        continue;
-      }
-      const email = em.buildEmailEpThreads(
-          INQUIRY_AUTHOR[Math.min(j, 2)],
-          inquiry.subject,
-          {
-            messageId: em.buildMessageId(`inquiry-${hash}`),
-            text: message,
-            date: new Date(inquiry.date)
-          });
-      if (previousHash) {
-        email.references = [em.buildMessageId(`inquiry-${previousHash}`)];
+      if (!state.inquiries[hash]) {
+        const email = em.buildEmailEpThreads(
+            INQUIRY_AUTHOR[Math.min(j, 2)],
+            inquiry.subject,
+            {
+              messageId: em.buildMessageId(`inquiry-${hash}`),
+              text: message.text,
+              date: new Date(message.date)
+            });
+        if (previousHash) {
+          email.references = [em.buildMessageId(`inquiry-${previousHash}`)];
+        }
+        INBOUND.push({
+          email: email,
+          ok: () => { state.inquiries[hash] = 1; }
+        });
       }
       previousHash = hash;
-      INBOUND.push({
-        email: email,
-        ok: () => { state.inquiries[hash] = 1; }
-      });
     }
   }
   state.inquiries = prunedHashes;
