@@ -557,7 +557,7 @@ async function readEvents(page, previousEvents) {
 
   // Filter those within the lookahead range and not yet processed.
   let lookaheadDate = new Date(todayZeroDate);
-  lookaheadDate.setDate(lookaheadDate.getDate() + CONFIG.options.eventLookaheadDays);
+  lookaheadDate.setDate(lookaheadDate.getDate() + CONFIG.elternportal.eventLookaheadDays);
   const lookaheadTs = lookaheadDate.getTime();
   let upcomingEvents = events
       .filter(e => e.ts >= todayZeroTs && e.ts <= lookaheadTs)
@@ -592,7 +592,7 @@ async function readEvents(page, previousEvents) {
       </style>
       </head>
       <body>
-      <h2>Termine in den n&auml;chsten ${CONFIG.options.eventLookaheadDays} Tagen</h2>
+      <h2>Termine in den n&auml;chsten ${CONFIG.elternportal.eventLookaheadDays} Tagen</h2>
       <table>`;
   upcomingEvents.forEach(e => emailHTML += `\n${TR_AND_STATUS[e.status]}</td>${e.html}</tr>`);
   emailHTML += '\n</table></body></html>';

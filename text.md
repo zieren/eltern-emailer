@@ -110,6 +110,7 @@ These parameters are used to log into the Eltern-Portal. To disable Eltern-Porta
 * `user` The login email address
 * `pass` The login password
 * `tag` A short name used to identify the school in emails
+* `eventLookaheadDays` For notification of upcoming events. This controls how long in advance you (and possibly the student, see `emailToStudent`) are notified. Each event triggers only one notification, so e.g. 14 means you are notified two weeks in advance and have to keep it in mind from then on.
 * `recipients` This controls who receives the different categories of messages. Each takes a comma-separated list of zero or more addresses, enclosed in `[]`.
   * `*` Receives everything
   * `lehrerkommunikation` Personal messages from teachers to parents ("Kommunikation Eltern/Fachlehrer" and ".../Klassenleitung")
@@ -149,7 +150,6 @@ These control the behavior of Eltern-Emailer.
    * `enabled` Check the IMAP inbox specified under [`imap`](#_imap). See [Sending Messages to Teachers](#_sending-messages-to-teachers) and [Reducing Latency](#_reducing-latency).
    * `forwardingAddress` The email address of the IMAP inbox to be forwarded to teachers. This enables replying to threads with teachers by email.
    * `allowForwardingFrom` List of email addresses allowed to send email to teachers. See [Protection Against Impersonation](#_protection-against-abuse).
-* `eventLookaheadDays` For notification of upcoming events. This controls how long in advance you (and possibly the student, see `emailToStudent`) are notified. Each event triggers only one notification, so e.g. 14 means you are notified two weeks in advance and have to keep it in mind from then on.
 * `checkIntervalMinutes` How frequently the Eltern-Portal website is checked for new content. This determines the maximum latency emails sent by Eltern-Emailer have relative to the content becoming visible online. Please keep this value at the default of 30 minutes (or higher) to limit traffic to the site.
 * `smtpWaitSeconds` Time to wait between sending emails. SMTP servers typically reject messages when they are enqueued too quickly.
 * `statusServerPort` Local port to use for the status monitoring server (zero to disable).

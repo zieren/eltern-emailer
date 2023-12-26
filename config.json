@@ -4,6 +4,7 @@
     "user": "EMAIL ADDRESS FOR LOGIN",
     "pass": "PASSWORD",
     "tag": "SHORT NAME IN EMAIL SENDER",
+    "eventLookaheadDays": 7,
     "recipients": {
       "*": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."],
       "lehrerkommunikation": [],
@@ -49,7 +50,6 @@
       "forwardingAddress": "IMAP EMAIL ADDRESS",
       "allowForwardingFrom": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."]
     },
-    "eventLookaheadDays": 7,
     "checkIntervalMinutes": 30,
     "smtpWaitSeconds": 5,
     "statusServerPort": 1984,
