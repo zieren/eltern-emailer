@@ -633,8 +633,9 @@ async function sendMessagesToTeachers(page) {
   for (const msg of outboundTmp) {
     // In case of multiple messages we prefix them with "[n/N] ". Assuming that n and N have at
     // most 2 characters, we simply substract 8 characters for every such prefix.
-    // TODO: Extract magic 512? Is that maybe even configurable?
-    const capacity = msg.text.length <= 512 ? 512 : (512 - 8);
+    const capacity = msg.text.length <= CONFIG.elternportal.messageSizeLimit
+        ? CONFIG.elternportal.messageSizeLimit
+        : (CONFIG.elternportal.messageSizeLimit - 8);
     const numParts = Math.ceil(msg.text.length / capacity);
     let onReplyPage = false;
     

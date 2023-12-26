@@ -5,6 +5,7 @@
     "pass": "PASSWORD",
     "tag": "SHORT NAME IN EMAIL SENDER",
     "eventLookaheadDays": 7,
+    "messageSizeLimit": 512,
     "recipients": {
       "*": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."],
       "lehrerkommunikation": [],

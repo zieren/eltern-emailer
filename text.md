@@ -111,6 +111,7 @@ These parameters are used to log into the Eltern-Portal. To disable Eltern-Porta
 * `pass` The login password
 * `tag` A short name used to identify the school in emails
 * `eventLookaheadDays` For notification of upcoming events. This controls how long in advance you (and possibly the student, see `emailToStudent`) are notified. Each event triggers only one notification, so e.g. 14 means you are notified two weeks in advance and have to keep it in mind from then on.
+* `messageSizeLimit` Emails you send to teachers are automatically split up if they exceed this length (in characters). The default is 512, but the actual limit may vary. Check your school's site, ask them or try it out.
 * `recipients` This controls who receives the different categories of messages. Each takes a comma-separated list of zero or more addresses, enclosed in `[]`.
   * `*` Receives everything
   * `lehrerkommunikation` Personal messages from teachers to parents ("Kommunikation Eltern/Fachlehrer" and ".../Klassenleitung")
@@ -163,7 +164,7 @@ These control the behavior of Eltern-Emailer.
 
 Eltern-Emailer can receive emails from you and forward them to teachers via the website. This requires a dedicated email account accessible via IMAP (see [`imap`](#_imap) above). The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. Outlook web mail is known to work.
 
-The message size limit enforced by the website does not apply here. If your email is longer than 512 characters (I'm not sure if all schools use the same limit; currently this value is hard-coded), it is automatically split up.
+The website may limit the size of individual messages you send to teachers. If your email exceeds the limit, Eltern-Emailer automatically splits it up. The size limit is configurable (see `elternportal.messageSizeLimit` in [Configuration](#_configuration)) because it may vary between schools/installations. The default is 512 characters.
 <a id="_protection-against-abuse"></a>
 
 #### Protection Against Impersonation
