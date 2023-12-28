@@ -79,7 +79,8 @@ function buildEmailSmAnnouncements(subject, options) {
 function buildEmail(fromName, recipients, subject, options) {
   const email = {...{
     from: `"${fromName}" <${CONFIG.options.adminAddress}>`,
-    subject: subject
+    subject: subject,
+    headers: { 'User-Agent': USER_AGENT }
   }, ...options};
   if (recipients.length > 1 && CONFIG.options.useBcc) {
     // The To: field is not required for the message to be valid, see

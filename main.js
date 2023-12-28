@@ -1,4 +1,5 @@
-const TITLE = 'Eltern-Emailer 0.8.1 (c) 2022-2023 Jörg Zieren, GNU GPL v3.'
+global.USER_AGENT = 'Eltern-Emailer 0.8.1'
+const LOG_STARTUP_MESSAGE = `${USER_AGENT} (c) 2022-2023 Jörg Zieren, GNU GPL v3.`
     + ' See https://zieren.de/software/eltern-emailer for component license info';
 
 const fs = require('fs-extra');
@@ -377,7 +378,7 @@ async function main() {
 
   readConfigFile(flags);
   logging.initialize(); // as early as possible
-  LOG.info(TITLE);
+  LOG.info(LOG_STARTUP_MESSAGE);
 
   await startStatusServer();
 
