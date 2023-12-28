@@ -1,23 +1,16 @@
 ; Read config or set defaults
 EnvGet, USERPROFILE, USERPROFILE ; e.g. c:\users\johndoe
-global INI_FILE, APP_NAME, SERVER_URL, EP_STALE_MINUTES, SM_STALE_MINUTES
+global INI_FILE, APP_NAME, SERVER_URL, MAX_STALE_MINUTES
 INI_FILE := USERPROFILE "\eltern-emailer-monitor.ini"
-APP_NAME := "Eltern-Emailer Monitor 0.1"
+APP_NAME := "Eltern-Emailer Monitor 0.2"
 IniRead, SERVER_URL, %INI_FILE%, server, url, http://localhost:1984
-IniRead, EP_STALE_MINUTES, %INI_FILE%, eltern-portal, max_stale_minutes, 60
-IniRead, SM_STALE_MINUTES, %INI_FILE%, schulmanager, max_stale_minutes, 60
+IniRead, MAX_STALE_MINUTES, %INI_FILE%, options, max_stale_minutes, 60
 
 ; main()
-Menu, Tray, NoStandard
-Menu, Tray, Add, Check &Now, DoTheThing
-Menu, Tray, Add, &Pause, PauseMonitoring
-Menu, Tray, Add, &Configuration, ShowConfigForm
-Menu, Tray, Add, &Exit, ExitMonitoring
-Menu, Tray, Tip, % APP_NAME
-Menu, Tray, Icon, icon.png,, 1 ; 1=freeze icon (don't use default icons)
+BuildTrayIcon()
 Loop {
   DoTheThing(false)
-  Sleep % 1000 * 60 * 10 ; check every 10 minutes
+  Sleep % 1000 * 60 * 5 ; check every 5 minutes
 }
 
 ; --------------- Helpers ---------------
@@ -56,47 +49,47 @@ ExceptionToString(exception) {
   msg := exception.Message
   if (exception.Extra)
     msg .= " (" exception.Extra ")"
-  return exception.Line " " msg
+  return msg
 }
 
 ; --------------- GUI ---------------
 
+BuildTrayIcon() {
+  Menu, Tray, NoStandard
+  Menu, Tray, Add, Check &Now, DoTheThing
+  Menu, Tray, Add, &Pause, PauseMonitoring
+  Menu, Tray, Add, &Configuration, ShowConfigForm
+  Menu, Tray, Add, &Exit, ExitMonitoring
+  Menu, Tray, Tip, % APP_NAME
+  Menu, Tray, Icon, icon.png,, 1 ; 1=freeze icon (don't use default icons)
+}
+
 ShowConfigForm() {
   Gui, ConfigForm:New,, % APP_NAME
   Gui, Add, Text, w200 x10 y13, Server address and port:
-  Gui, Add, Edit, w200 x130 y10 vSERVER_URL, % SERVER_URL
-  Gui, Add, Text, x10 y45 Multi, Enter maximum staleness in minutes.`nA value of 0 (zero) disables the respective check.
-  Gui, Add, Text, w200 x10 y83, Eltern-Portal:
-  Gui, Add, Edit, w40 x85 y80 vEP_STALE_MINUTES, % EP_STALE_MINUTES
-  Gui, Add, Text, w200 x10 y105, Schulmanager:
-  Gui, Add, Edit, w40 x85 y102 vSM_STALE_MINUTES, % SM_STALE_MINUTES
-  Gui, Add, Button, Default w80 x10 y140 gConfigFormOK, &OK
-  Gui, Add, Button, w80 x250 y140 gConfigFormCancel, &Cancel
+  Gui, Add, Edit, w200 x152 y10 vSERVER_URL, % SERVER_URL
+  Gui, Add, Text, w200 x10 y43, Maximum staleness (minutes):
+  Gui, Add, Edit, w40 x152 y40 vMAX_STALE_MINUTES, % MAX_STALE_MINUTES
+  Gui, Add, Button, Default w80 x10 y70 gConfigFormOK, &OK
+  Gui, Add, Button, w80 x250 y70 gConfigFormCancel, &Cancel
   Gui, Show
 }
 
 HandleConfigOK() {
   Gui, Submit, NoHide
   StringLower, SERVER_URL, % Trim(SERVER_URL)
-  EP_STALE_MINUTES := Trim(EP_STALE_MINUTES)
-  SM_STALE_MINUTES := Trim(SM_STALE_MINUTES)
+  MAX_STALE_MINUTES := Trim(MAX_STALE_MINUTES)
   if (!RegExMatch(SERVER_URL, "^https?://")) {
     MsgBox, % "Invalid server address: " SERVER_URL
     return
   }
-  if (!RegExMatch(EP_STALE_MINUTES, "^\d+$")) {
-    MsgBox, % "Invalid value: " EP_STALE_MINUTES
-    return
-  }
-  if (!RegExMatch(SM_STALE_MINUTES, "^\d+$")) {
-    MsgBox, % "Invalid value: " SM_STALE_MINUTES
+  if (!RegExMatch(MAX_STALE_MINUTES, "^\d+$")) {
+    MsgBox, % "Invalid value: " MAX_STALE_MINUTES
     return
   }
   Gui, Destroy
   IniWrite, %SERVER_URL%, %INI_FILE%, server, url
-  IniWrite, %EP_STALE_MINUTES%, %INI_FILE%, eltern-portal, max_stale_minutes
-  IniWrite, %SM_STALE_MINUTES%, %INI_FILE%, schulmanager, max_stale_minutes
-  MsgBox,, Configuration Updated, % "Configuration written to: " INI_FILE
+  IniWrite, %MAX_STALE_MINUTES%, %INI_FILE%, options, max_stale_minutes
 }
 
 ConfigFormOK:
@@ -112,7 +105,7 @@ return
 
 DoTheThing(forceMessage = true) {
   exception := ""
-  responseLines := []
+  response := ""
   ; When waking up from OS sleep, requests may fail. We retry 3x over 10s in the hope that
   ; that's enough time to wake up and be online again.
   Loop, 3 {
@@ -128,37 +121,32 @@ DoTheThing(forceMessage = true) {
       request.SetRequestHeader("Pragma", "no-cache")
       request.SetRequestHeader("Expires", "0")
       request.Send()
-      responseLines := StrSplit(request.ResponseText, "`n")
+      if (request.status != 200) {
+        throw Exception("HTTP " request.status ": " request.statusText)
+      }
+      response := Trim(request.ResponseText, " `n`t")
+      if (!RegExMatch(response, "^[0-9]+$")) {
+        throw Exception("Invalid server response:`n" response)
+      }
       break
     } catch e {
       ; Last exception wins, because earlier ones are more likely to be transient.
       exception := e
     }
   }
-  if (responseLines.Length() != 2) {
-    MsgBox,, %APP_NAME% - ERROR, % "Server unreachable:`n`n" ExceptionToString(exception)
+  if (exception) {
+    MsgBox, 0x10, %APP_NAME% - ERROR, % "Status check failed:`n`n" ExceptionToString(exception)
     return
   }
 
-  epSeconds := GetSecondsElapsed(responseLines[1])
-  smSeconds := GetSecondsElapsed(responseLines[2])
-
-  message := ""
-  epStale := EP_STALE_MINUTES > 0 && epSeconds > 60 * EP_STALE_MINUTES
-  if (epStale || (forceMessage && EP_STALE_MINUTES > 0)) {
-    hhmmss := FormatSeconds(epSeconds)
-    message := message "Eltern-Portal: Last successful login was " hhmmss " ago"
+  seconds := GetSecondsElapsed(response)
+  isStale := seconds > 60 * MAX_STALE_MINUTES
+  if (forceMessage || isStale) {
+    hhmmss := FormatSeconds(seconds)
+    maxHhmmss := FormatSeconds(MAX_STALE_MINUTES * 60)
+    message := "Last successful check was " hhmmss " ago`nMaximum staleness is " maxHhmmss
+    level := isStale ? "WARNING" : "INFO"
+    icon := isStale ? 0x30 : 0x40
+    MsgBox, % icon, %APP_NAME% - %level%, % message
   }
-  smStale := SM_STALE_MINUTES > 0 && smSeconds > 60 * SM_STALE_MINUTES
-  if (smStale || (forceMessage && SM_STALE_MINUTES > 0)) {
-    if (message) {
-      message := message "`n"
-    }
-    hhmmss := FormatSeconds(smSeconds)
-    message := message "Schulmanager: Last successful login was " hhmmss " ago"
-  }
-  level := (epStale || smStale) ? "WARNING" : "INFO"
-  if (message) {
-    MsgBox,, %APP_NAME% - %level%, % message
-  }  
 }

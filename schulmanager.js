@@ -39,7 +39,6 @@ async function login(page) {
     throw 'Login Schulmanager failed';
   }
   LOG.info('Login Schulmanager OK');
-  global.SM_LAST_SUCCESSFUL_LOGIN = Date.now();
 }
 
 function maybeCreateTempDir() {
@@ -100,7 +99,7 @@ async function readLetters(page, processedLetters) {
       const subject = td.innerText.trim();
       const dateString = td.previousElementSibling.innerText.trim();
       const d = dateString.match(/(\d\d)\.(\d\d)\.(\d\d)[, ]+(\d\d):(\d\d)/);
-            return {
+      return {
         // We could use "id" below to find the message in the list, but the index is more
         // straightforward.
         index: 1 + Array.prototype.indexOf.call(

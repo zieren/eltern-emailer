@@ -15,7 +15,6 @@ const em = require('./email.js');
 // ---------- External constants ----------
 
 const EMPTY_STATE = {
-  lastSuccessfulRun: 0, // Last successful run (epoch millis). Older data can be skipped.
   threads: {}, // key: thread ID; value: { key: msg index; value: 1 }
   announcements: {}, // key: announcement ID; value: 1
   inquiries: {}, // key: hash from message subject, date and content; value: 1
@@ -93,7 +92,6 @@ async function loginElternPortal(page) {
     throw 'Login Eltern-Portal failed';
   }
   LOG.info('Login Eltern-Portal OK');
-  global.EP_LAST_SUCCESSFUL_LOGIN = Date.now();
 }
 
 // Called lazily to authenticate file requests (attachments).
@@ -710,7 +708,8 @@ async function sendMessagesToTeachers(page) {
 // We use the "answered" flag, which is part of the IMAP standard, to mark messages done.
 async function processNewEmail() {
   // Collect messages not intended for forwarding to teachers. These are marked processed to hide
-  // them in the next query. They only trigger a crawl. Key is IMAP sequence number, value is 1.
+  // them in the next query. They only trigger a scraping iteration. Key is IMAP sequence number, 
+  // value is 1.
   const ignoredMessages = {};
   let numNewMessages = 0;
   
@@ -823,8 +822,8 @@ async function markEmailDone(seq) {
 async function processElternPortal(page, state) {
   await loginElternPortal(page);
 
-  // Send messages to teachers. We later retrieve those messages when crawling threads below. That
-  // is intentional because presumably the second parent wants a copy of the message.
+  // Send messages to teachers. We will later retrieve those messages when scraping threads with
+  // teachers. That is intentional because presumably the second parent wants a copy of the message.
   await sendMessagesToTeachers(page);
 
   // Section "Aktuelles".
@@ -837,8 +836,8 @@ async function processElternPortal(page, state) {
   buildEmailsForInquiries(inquiries, state.ep);
 
   // Section "Kommunikation Eltern/Fachlehrer".
-  const teachers = await readActiveTeachers(page, state.ep.lastSuccessfulRun);
-  await readThreadsMeta(page, teachers, state.ep.lastSuccessfulRun);
+  const teachers = await readActiveTeachers(page, state.lastSuccessfulRun);
+  await readThreadsMeta(page, teachers, state.lastSuccessfulRun);
   await readThreadsContents(page, teachers);
   await readThreadsAttachments(page, teachers, state.ep.threads);
   buildEmailsForThreads(teachers, state.ep.threads);

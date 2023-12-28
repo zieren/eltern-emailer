@@ -10,13 +10,14 @@ function buildMessageId(localId) {
   return `${localId}.eltern-emailer@${CONFIG.options.adminAddress.replace(/.*@/, '')}`;
 }
 
-function createTestEmail(numEmails) {
+function createTestEmail(numEmails, success) {
   const email = buildEmail(
       'Eltern-Emailer',
       CONFIG.options.adminAddress,
       'Test message',
       {
-        text: `The test run was successful. ${numEmails} email(s) would have been sent.`
+        text: `The test run ${success ? 'succeeded' : 'failed (see log for details)'}.\n`
+            + `${numEmails} email(s) would have been sent.`
       });
   return [{email: email, ok: () => {}}];
 }
