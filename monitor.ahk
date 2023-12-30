@@ -106,11 +106,11 @@ return
 DoTheThing(forceMessage = true) {
   exception := ""
   response := ""
-  ; When waking up from OS sleep, requests may fail. We retry 3x over 10s in the hope that
+  ; When waking up from OS sleep, requests may fail. We try 5x over 40s in the hope that
   ; that's enough time to wake up and be online again.
-  Loop, 3 {
+  Loop, 5 {
     if (A_Index > 1) {
-      Sleep, 5 * 1000
+      Sleep, 10 * 1000 ; 10 seconds
     }
     try {
       request := ComObjCreate("WinHTTP.WinHTTPRequest.5.1")
@@ -128,6 +128,7 @@ DoTheThing(forceMessage = true) {
       if (!RegExMatch(response, "^[0-9]+$")) {
         throw Exception("Invalid server response:`n" response)
       }
+      exception := "" ; previous failures are to be forgotten
       break
     } catch e {
       ; Last exception wins, because earlier ones are more likely to be transient.
