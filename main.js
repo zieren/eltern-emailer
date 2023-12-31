@@ -394,12 +394,12 @@ async function main() {
     try {
       IMAP_CLIENT = await createImapClient();
     } catch (e) {
-      // Error details were already logged by our custom logger.
-      // Check for some permanent errors upon which we should quit. This list may need to be
-      // extended.
+      // Error details were already logged by our custom logger. This would be the place to bail out
+      // on a permanent error, but so far all errors can also be transient, so we never do bail out.
       if (e.authenticationFailed) {
-        LOG.error('IMAP server rejected credentials');
-        return 3;
+        LOG.error('IMAP server rejected credentials. This may actually be transient; will retry');
+        // My server sometimes returns an auth failure with the message "User is authenticated but
+        // not connected.", despite correct credentials.
       }
       if (e.code == 'ENOTFOUND') {
         LOG.error('IMAP server not found (will retry)');
