@@ -44,7 +44,7 @@ It then sends these messages and updates to you via email.
 
 Optionally, it also checks a dedicated IMAP inbox for emails from you and forwards them to the intended teacher. This allows you to communicate with any teacher entirely via email.
 
-The application does not interact with any third parties except your email provider. It runs on your own desktop or server. A simple tool is included to monitor the server's status and alert in case of basic issues.
+The application does not interact with any third parties except your email provider. It runs on your own desktop or server. A simple tool is included to monitor the server's status and alert in case of issues.
 
 ### Requirements
 
@@ -194,7 +194,7 @@ You can simply configure the email account you are currently using for the websi
 
 ## Running the Application
 
-Eltern-Emailer runs in the Node.js runtime environment. It does not use the website's indication of new messages (because that is reset when you read them online, and it's also not available for some types of content). Instead it uses a file called `state.json` to remember which content has already been emailed and detect which is new. This file is reread before each check, so it can be edited while the application is waiting for the next check.
+Eltern-Emailer runs in the Node.js runtime environment. It does not use the website's indication of new messages (because that is reset when you read them online, and it's also not available for some types of content). Instead it uses a file called `state.json` to remember which content has already been emailed and detect which is new. This file is reread before each check; for debugging it can be edited while the application is waiting for the next check.
 
 Initially this file does not exist and all messages and content will appear new. If you don't want to get flooded with emails on the first run, run Eltern-Emailer once with these [flags](#_flags):
 
@@ -242,7 +242,7 @@ The following flags are supported:
 
 ## Log File
 
-Log messages are shown on the console and written to the file `eltern-emailer.log`. The log level can be set in the config file. While the project is in alpha state it defaults to `debug`.
+Log messages are shown on the console and written to the file `eltern-emailer.log` Log files are rotated at 10MB, keeping at most three files. The log level can be set in the config file. It defaults to `debug`.
 
 ## Components Used
 
