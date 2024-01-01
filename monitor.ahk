@@ -62,6 +62,7 @@ BuildTrayIcon() {
   Menu, Tray, Add, &Exit, ExitMonitoring
   Menu, Tray, Tip, % APP_NAME
   Menu, Tray, Icon, icon.png,, 1 ; 1=freeze icon (don't use default icons)
+  Menu, Tray, Default, Check &Now
 }
 
 ShowConfigForm() {
