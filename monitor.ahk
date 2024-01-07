@@ -1,27 +1,29 @@
+#Requires AutoHotkey v2.0
+
 ; Read config or set defaults
-EnvGet, USERPROFILE, USERPROFILE ; e.g. c:\users\johndoe
-global INI_FILE, APP_NAME, SERVER_URL, MAX_STALE_MINUTES
+USERPROFILE := EnvGet("USERPROFILE") ; e.g. c:\users\johndoe
+global INI_FILE, APP_NAME, SERVER_URL, MAX_STALE_MINUTES, GUI_CONFIG
 INI_FILE := USERPROFILE "\eltern-emailer-monitor.ini"
-APP_NAME := "Eltern-Emailer Monitor 0.2"
-IniRead, SERVER_URL, %INI_FILE%, server, url, http://localhost:1984
-IniRead, MAX_STALE_MINUTES, %INI_FILE%, options, max_stale_minutes, 60
+APP_NAME := "Eltern-Emailer Monitor 0.3"
+SERVER_URL := IniRead(INI_FILE, "server", "url", "http://localhost:1984")
+MAX_STALE_MINUTES := IniRead(INI_FILE, "options", "max_stale_minutes", 60)
 
 ; main()
 BuildTrayIcon()
 Loop {
   DoTheThing(false)
-  Sleep % 1000 * 60 * 5 ; check every 5 minutes
+  Sleep 1000 * 60 * 5 ; check every 5 minutes
 }
 
 ; --------------- Helpers ---------------
 
-PauseMonitoring() {
+PauseMonitoring(*) {
   ; We have to change the icon before we pause, hence the inverted logic.
-  Menu, Tray, Icon, % A_IsPaused ? "icon.png" : "icon-paused.png",, 1
+  TraySetIcon(A_IsPaused ? "icon.png" : "icon-paused.png", 0, 1)
   Pause ; defaults to "Toggle"
 }
 
-ExitMonitoring() {
+ExitMonitoring(*) {
   ExitApp
 }
 
@@ -31,9 +33,7 @@ GetSecondsElapsed(timestampMillis) {
 }
 
 EpochSeconds() {
-  ts := A_NowUTC
-  EnvSub, ts, 19700101000000, Seconds
-  return ts
+  return DateDiff(A_NowUTC, 19700101000000, "Seconds")
 }
 
 ; Returns the specified seconds formatted as "hh:mm:ss".
@@ -55,66 +55,71 @@ ExceptionToString(exception) {
 ; --------------- GUI ---------------
 
 BuildTrayIcon() {
-  Menu, Tray, NoStandard
-  Menu, Tray, Add, Check &Now, DoTheThing
-  Menu, Tray, Add, &Pause, PauseMonitoring
-  Menu, Tray, Add, &Configuration, ShowConfigForm
-  Menu, Tray, Add, &Exit, ExitMonitoring
-  Menu, Tray, Tip, % APP_NAME
-  Menu, Tray, Icon, icon.png,, 1 ; 1=freeze icon (don't use default icons)
-  Menu, Tray, Default, Check &Now
+  A_TrayMenu.Delete()
+  A_TrayMenu.Add("Check &Now", DoTheThingForceMessage)
+  A_TrayMenu.Add("&Pause", PauseMonitoring)
+  A_TrayMenu.Add("&Configuration", ShowConfigForm)
+  A_TrayMenu.Add("&Exit", ExitMonitoring)
+  A_IconTip := APP_NAME
+  TraySetIcon("icon.png", 0, 1) ; 1=freeze icon (don't use default icons)
+  A_TrayMenu.Default := "Check &Now"
 }
 
-ShowConfigForm() {
-  Gui, ConfigForm:New,, % APP_NAME
-  Gui, Add, Text, w200 x10 y13, Server address and port:
-  Gui, Add, Edit, w200 x152 y10 vSERVER_URL, % SERVER_URL
-  Gui, Add, Text, w200 x10 y43, Maximum staleness (minutes):
-  Gui, Add, Edit, w40 x152 y40 vMAX_STALE_MINUTES, % MAX_STALE_MINUTES
-  Gui, Add, Button, Default w80 x10 y70 gConfigFormOK, &OK
-  Gui, Add, Button, w80 x250 y70 gConfigFormCancel, &Cancel
-  Gui, Show
+ShowConfigForm(*) {
+  global GUI_CONFIG := Gui("", APP_NAME)
+  GUI_CONFIG.add("Text", "w200 x10 y13", "Server address and port:")
+  GUI_CONFIG.add("Edit", "w200 x152 y10 vServerUrl", SERVER_URL)
+  GUI_CONFIG.add("Text", "w200 x10 y43", "Maximum staleness (minutes):")
+  GUI_CONFIG.add("Edit", "w40 x152 y40 Number vMaxStaleMinutes", MAX_STALE_MINUTES)
+  b := GUI_CONFIG.add("Button", "Default w80 x10 y70", "&OK")
+  b.OnEvent("Click", HandleConfigOK)
+  b := GUI_CONFIG.add("Button", "w80 x250 y70", "&Cancel")
+  b.OnEvent("Click", HandleConfigCancel)
+  GUI_CONFIG.OnEvent("Close", HandleConfigCancel)
+  GUI_CONFIG.OnEvent("Escape", HandleConfigCancel)
+  GUI_CONFIG.Show()
 }
 
-HandleConfigOK() {
-  Gui, Submit, NoHide
-  StringLower, SERVER_URL, % Trim(SERVER_URL)
-  MAX_STALE_MINUTES := Trim(MAX_STALE_MINUTES)
-  if (!RegExMatch(SERVER_URL, "^https?://")) {
-    MsgBox, % "Invalid server address: " SERVER_URL
+HandleConfigOK(*) {
+  newValues := GUI_CONFIG.Submit(false) ; don't hide the window
+  serverUrl := StrLower(Trim(newValues.ServerUrl))
+  maxStaleMinutes := Trim(newValues.MaxStaleMinutes)
+  if (!RegExMatch(serverUrl, "^https?://")) {
+    MsgBox("Invalid server address: " serverUrl)
     return
   }
-  if (!RegExMatch(MAX_STALE_MINUTES, "^\d+$")) {
-    MsgBox, % "Invalid value: " MAX_STALE_MINUTES
+  if (!RegExMatch(maxStaleMinutes, "^\d+$")) {
+    MsgBox("Invalid value: " maxStaleMinutes)
     return
   }
-  Gui, Destroy
-  IniWrite, %SERVER_URL%, %INI_FILE%, server, url
-  IniWrite, %MAX_STALE_MINUTES%, %INI_FILE%, options, max_stale_minutes
+  GUI_CONFIG.Destroy()
+  global SERVER_URL := serverUrl
+  global MAX_STALE_MINUTES := maxStaleMinutes
+  IniWrite SERVER_URL, INI_FILE, "server", "url"
+  IniWrite MAX_STALE_MINUTES, INI_FILE, "options", "max_stale_minutes"
 }
 
-ConfigFormOK:
-HandleConfigOK()
-return
-
-ConfigFormCancel:
-ConfigFormGuiEscape:
-Gui, Destroy
-return
+HandleConfigCancel(*) {
+  GUI_CONFIG.Destroy()
+}
 
 ; --------------- Check ---------------
 
-DoTheThing(forceMessage = true) {
+DoTheThingForceMessage(*) { 
+  DoTheThing(true) 
+}
+
+DoTheThing(forceMessage) {
   exception := ""
   response := ""
   ; When waking up from OS sleep, requests may fail. We try 5x over 40s in the hope that
   ; that's enough time to wake up and be online again.
-  Loop, 5 {
+  Loop 5 {
     if (A_Index > 1) {
-      Sleep, 10 * 1000 ; 10 seconds
+      Sleep 10 * 1000 ; 10 seconds
     }
     try {
-      request := ComObjCreate("WinHTTP.WinHTTPRequest.5.1")
+      request := ComObject("WinHTTP.WinHTTPRequest.5.1")
       request.Open("GET", SERVER_URL, false)
 
       ; We really really want no caching.
@@ -131,13 +136,13 @@ DoTheThing(forceMessage = true) {
       }
       exception := "" ; previous failures are to be forgotten
       break
-    } catch e {
+    } catch as e {
       ; Last exception wins, because earlier ones are more likely to be transient.
       exception := e
     }
   }
   if (exception) {
-    MsgBox, 0x10, %APP_NAME% - ERROR, % "Status check failed:`n`n" ExceptionToString(exception)
+    MsgBox("Status check failed:`n`n" ExceptionToString(exception), APP_NAME " - ERROR", 0x10)
     return
   }
 
@@ -149,6 +154,6 @@ DoTheThing(forceMessage = true) {
     message := "Last successful check was " hhmmss " ago`nMaximum staleness is " maxHhmmss
     level := isStale ? "WARNING" : "INFO"
     icon := isStale ? 0x30 : 0x40
-    MsgBox, % icon, %APP_NAME% - %level%, % message
+    MsgBox(message, APP_NAME " - " level, icon)
   }
 }
