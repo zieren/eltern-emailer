@@ -507,7 +507,7 @@ async function main() {
       if (ep.haveOutbound()) {
         resolve();
       } else {
-        const waitMillis = Math.min(...Object.values(nextTryMillis)) - Date.now();
+        const waitMillis = Math.max(Math.min(...Object.values(nextTryMillis)) - Date.now(), 0);
         LOG.debug(`Waiting ${formatMillis(waitMillis)} until next check`);
         setTimeout(resolve, waitMillis);
       }
