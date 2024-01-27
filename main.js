@@ -1,4 +1,4 @@
-global.USER_AGENT = 'Eltern-Emailer 0.8.1'
+global.USER_AGENT = 'Eltern-Emailer 0.9.0'
 const LOG_STARTUP_MESSAGE = `${USER_AGENT} (c) 2022-2024 Jörg Zieren, GNU GPL v3.`
     + ' See https://zieren.de/software/eltern-emailer for component license info';
 
@@ -20,8 +20,8 @@ global.CONFIG = {};
 // Inbound messages are intended for the user(s). They are generated from scraping the portal(s) and
 // emailed to the user(s) via SMTP.
 global.INBOUND = [];
-// The ~current time (epoch millis). Set at the start of each main loop iteration.
-global.NOW = null;
+// The ~current time (epoch millis). Updated at the start of each main loop iteration.
+global.NOW = Date.now(); // init to actual now() because we need it for other initializations
 // The IMAP client. Initialized in main().
 global.IMAP_CLIENT = null;
 
@@ -84,15 +84,13 @@ const IMAP_LOGGER = {
 // ---------- Retry throttling ----------
 
 /** Seconds to wait after a failure, assuming no recent previous failure. */
-const DEFAULT_RETRY_WAIT_SECONDS = 15;
-/** If the last failure was less than this ago, back off exponentially. */
-const BACKOFF_TRIGGER_SECONDS = 60 * 60; // 1h
+const INITIAL_RETRY_WAIT_SECONDS = 15;
 /** Maximum time to wait in exponential backoff. */
 const MAX_RETRY_WAIT_SECONDS = 60 * 60; // 1h
-/** Retry wait time for the last error. */
-let RETRY_WAIT_SECONDS = DEFAULT_RETRY_WAIT_SECONDS;
-/** Timestamp of the last error. */
-let LAST_FAILURE_EPOCH_MILLIS = 0;
+/** Time to wait before retrying (exponential backoff). 0 means there was no error. */
+const retrySeconds = {"imap": 0, "ep": 0, "sm": 0};
+/** Epoch time at which the next try should be made. */
+const nextTryMillis = {"imap": NOW, "ep": NOW, "sm": NOW};
 
 // ---------- Synchronization ----------
 
@@ -117,23 +115,14 @@ let STATUS_SERVER = null;
 
 // ---------- Initialization functions ----------
 
-async function startStatusServer() {
-  if (STATUS_SERVER) {
-    LOG.info(`Shutting down status server...`);
-    await new Promise((resolve) => STATUS_SERVER.close(resolve()));
-  }
-  const port = CONFIG.options.statusServerPort;
-  if (!port) {
-    return;
-  }
+async function maybeStartStatusServer() {
   STATUS_SERVER = http.createServer((_, res) => {
     res.setHeader('Content-Type', 'text/plain');
     res.write(`${STATE.lastSuccessfulRun}`);
     res.end();
   });
-
-  STATUS_SERVER.listen(port, () => {
-    LOG.info(`Status server listening on port ${port}`);
+  STATUS_SERVER.listen(CONFIG.options.statusServerPort, () => {
+    LOG.info(`Status server listening on port ${CONFIG.options.statusServerPort}`);
   });
 }
 
@@ -208,6 +197,14 @@ async function gracefulExit(retval) {
   LOG.debug('Waiting 5s for log to flush (sic)...');
   await sleepSeconds(5);
   process.exit(retval);
+}
+
+function formatMillis(millis) {
+  seconds = Math.round(millis / 1000);
+  const minutes = Math.floor(seconds / 60);
+  seconds -= minutes * 60;
+  seconds = `${seconds}`.padStart(2, '0');
+  return `${minutes}:${seconds}`;
 }
 
 // ---------- Email sending ----------
@@ -316,22 +313,6 @@ async function createImapClient() {
 }
 
 /** 
- * Check the main IMAP connection by running a NOOP command, and log the result. Rethrows the
- * original error on failure.
- */
-async function checkImapConnection() {
-  if (IMAP_CLIENT) {
-    try {
-      await IMAP_CLIENT.noop(); // runs on the server
-      LOG.debug('IMAP connection OK');
-    } catch (e) {
-      LOG.error('IMAP connection down'); // The outer (retry) loop will log the error details.
-      throw e;
-    }
-  }
-}
-
-/** 
  * Try to logout() gracefully. In some conditions (e.g. when an operation is in progress) this won't
  * work and we can only close(). 
  */
@@ -360,10 +341,67 @@ async function disposeImapClient() {
 async function tryProcess(process, page) {
   try {
     await process(page, STATE);
+    return true;
   } catch (e) {
     LOG.error(`Error in ${process.name}:\n${e.stack || e}`);
-    return e;
+    return false;
   }
+}
+
+function setNextTryMillis(site, success, retrySeconds, nextTryMillis) {
+  if (NOW < nextTryMillis[site]) {
+    return; // we haven't tried yet
+  }
+  retrySeconds[site] = success
+      ? 0
+      : (retrySeconds[site]
+          ? Math.min(2 * retrySeconds[site], MAX_RETRY_WAIT_SECONDS) 
+          : INITIAL_RETRY_WAIT_SECONDS);
+  // In case of an error, make sure we actually do not retry for the specified time.
+  // In case of an error, we want to leave the failed server alone for the specified time. In case
+  // of success, we want to schedule the next attempt from the beginning of the previous attempt.
+  nextTryMillis[site] = retrySeconds[site]
+      ? Date.now() + 1000 * retrySeconds[site]
+      : NOW + 1000 * 60 * CONFIG.options.checkIntervalMinutes;
+}
+
+async function maybeStartOrCheckImap() {
+  if (!CONFIG.options.incomingEmail.enabled) {
+    return true;
+  }
+  if (!IMAP_CLIENT) {
+    try {
+      IMAP_CLIENT = await createImapClient();
+    } catch (e) {
+      // Error details were already logged by our custom logger. This would be the place to bail out
+      // on a permanent error, but so far all errors can also be transient, so we never do bail out.
+      if (e.authenticationFailed) {
+        LOG.error('IMAP server rejected credentials. This may actually be transient; will retry');
+        // My server sometimes returns an auth failure with the message "User is authenticated but
+        // not connected.", despite correct credentials.
+      } else if (e.code == 'ENOTFOUND') {
+        LOG.error('IMAP server not found; will retry');
+        // This can be permanent (e.g. typo) or transient (e.g. just resumed from OS suspended state 
+        // and network not yet up, or some other temporary network issue). We don't bother telling
+        // these cases apart because the permanent case is rare and easily identified and fixed.
+      } else {
+        // Occasionally we get "some other error" (hooray for implicit typing...). We assume here
+        // that all errors at this point are transient and will retry with exponential backoff.
+        LOG.error('Other IMAP error; will retry')
+      }
+      IMAP_CLIENT = null; // initiate retry
+    }
+  } else {
+    try {
+      await IMAP_CLIENT.noop(); // runs on the server
+      LOG.debug('IMAP connection OK');
+    } catch (e) {
+      LOG.error(`IMAP connection down:\n${(e && e.stack) || e}`);
+      IMAP_CLIENT = null; // initiate retry
+    }
+  }
+  // At least my IMAP server is too flaky to report an error here.
+  return IMAP_CLIENT != null;
 }
 
 /** 
@@ -380,7 +418,7 @@ async function main() {
   logging.initialize(); // as early as possible
   LOG.info(LOG_STARTUP_MESSAGE);
 
-  await startStatusServer();
+  await maybeStartStatusServer();
 
   // This is just a best effort check in case the user completely forgot to edit the file. We don't
   // repeat it when we reread the file in the main loop.
@@ -389,40 +427,11 @@ async function main() {
     return 2;
   }
 
-  // Start IMAP listener, if enabled.
-  if (CONFIG.options.incomingEmail.enabled) {
-    try {
-      IMAP_CLIENT = await createImapClient();
-    } catch (e) {
-      // Error details were already logged by our custom logger. This would be the place to bail out
-      // on a permanent error, but so far all errors can also be transient, so we never do bail out.
-      if (e.authenticationFailed) {
-        LOG.error('IMAP server rejected credentials. This may actually be transient; will retry');
-        // My server sometimes returns an auth failure with the message "User is authenticated but
-        // not connected.", despite correct credentials.
-      }
-      if (e.code == 'ENOTFOUND') {
-        LOG.error('IMAP server not found (will retry)');
-        // This can be permanent (e.g. typo) or transient (e.g. just resumed from OS suspended state 
-        // and network not yet up, or some other temporary network issue). We don't bother telling
-        // these cases apart because the permanent case is rare and easily identified and fixed.
-      }
-      // Occasionally we get "some other error" (hooray for implicit typing...). We assume here
-      // that all errors not handled above are transient, which may be wrong but shouldn't cause
-      // too much trouble due to our exponential backoff.
-      throw e; // retry
-    }
-  }
-
   while (true) {
     if (SIGTERM_RECEIVED) {
       return 0;
     }
     
-    NOW = Date.now();
-
-    // Reread config and state within the loop to allow editing the files without restarting.
-    readConfigFile(flags);
     readState();
 
     // Launch Puppeteer. On the Raspberry Pi the browser executable is typically named
@@ -434,19 +443,41 @@ async function main() {
     BROWSER = await puppeteer.launch(puppeteerOptions);
     const page = await BROWSER.newPage();
 
-    // Try to process both. If one fails we still want to send emails generated by the other.
-    const epException =
-        elternPortalConfigured() ? await tryProcess(ep.processElternPortal, page) : null;
-    const smException =
-        schulmanagerConfigured() ? await tryProcess(sm.processSchulmanager, page) : null;
-    const success = !epException && !smException;
+    NOW = Date.now();
 
+    // Starting/checking our IMAP listener and scraping the sites are the primary error sources. We
+    // retry them quickly (INITIAL_RETRY_WAIT_SECONDS), with exponential backoff, to limit the
+    // latency impact we'd have if we just skipped them and waited for the next iteration.
+
+    // IMAP occasionally fails. We retry here like we do for EP/SM.
+    const imapOK = NOW < nextTryMillis.imap ? true : await maybeStartOrCheckImap();
+    setNextTryMillis("imap", imapOK, retrySeconds, nextTryMillis);
+    // Process both EP and SM. If one fails we still want to send emails generated by the other.
+    const epOK = NOW < nextTryMillis.ep ? true :
+        (elternPortalConfigured() ? await tryProcess(ep.processElternPortal, page) : true);
+    setNextTryMillis("ep", epOK, retrySeconds, nextTryMillis);
+    const smOK = NOW < nextTryMillis.sm ? true :
+        (schulmanagerConfigured() ? await tryProcess(sm.processSchulmanager, page) : true);
+    setNextTryMillis("sm", smOK, retrySeconds, nextTryMillis);
+
+    // We can now have a race: Consider the time it takes until we update "awake" to point to the
+    // new "resolve" in the below Promise that waits for the next iteration. This time is probably
+    // mostly spent in sendEmails(). If during this time new content appears that we didn't cover
+    // just now, *and* the notification email is also received during this time, then our IMAP
+    // listener will call "awake" for the previous (already resolved) Promise. This case seems too
+    // unlikely (and too benign) to spend any code complexity on.
+
+    const success = epOK && smOK;
     if (CONFIG.options.test) {
       INBOUND = em.createTestEmail(INBOUND.length, success); // Replace with exactly one test email.
     }
     await sendEmails();
     if (!CONFIG.options.test) {
       if (success) {
+        // If we have an error on one site, this may sacrifice performance on the other by not
+        // advancing lastSuccessfulRun. The alternative of keeping track of this per site doesn't
+        // seem worth it; we'd be optimizing for a rare error case (persistent failure) that needs
+        // to be resolved anyway.
         STATE.lastSuccessfulRun = NOW;
       }
       fs.writeFileSync(STATE_FILE, JSON.stringify(STATE, null, 2));
@@ -459,23 +490,10 @@ async function main() {
     if (CONFIG.options.once) {
       LOG.info('Terminating due to --once flag/option');
       if (IMAP_CLIENT) {
-        await IMAP_CLIENT.logout();
+        await disposeImapClient();
       }
       return 0;
     }
-
-    // Rethrow potential exceptions. EP arbitrarily takes precedence.
-    if (epException) {
-      throw epException;
-    } else if (smException) {
-      throw smException;
-    }
-
-    await checkImapConnection();
-    // There is now a short time window for a race, where an error after the successful check above
-    // would awake() the previous Promise before "awake" is updated to the new Promise below. This
-    // seems very unlikely though, and would just delay the IMAP restart until we check again in the
-    // next iteration.
 
     // Wait until timeout or email received. The email may or may not be a "new message" 
     // notification. We don't care and do the next iteration unconditionally.
@@ -489,8 +507,9 @@ async function main() {
       if (ep.haveOutbound()) {
         resolve();
       } else {
-        LOG.debug('Waiting %d minutes until next check', CONFIG.options.checkIntervalMinutes);
-        setTimeout(resolve, CONFIG.options.checkIntervalMinutes * 60 * 1000);
+        const waitMillis = Math.min(...Object.values(nextTryMillis)) - Date.now();
+        LOG.debug(`Waiting ${formatMillis(waitMillis)} until next check`);
+        setTimeout(resolve, waitMillis);
       }
     });
   }
@@ -510,27 +529,11 @@ async function main() {
       }
       LOG.error('Error in main loop:\n%s', (e && e.stack) || e);
     }
-
-    // The main loop threw an exception. Rerun with exponential backoff. This addresses transient
-    // errors, e.g. IMAP connection issues or scraping timeouts. Permanent errors, e.g. page layout
-    // changes that break the scraping code, lead to retries every MAX_RETRY_WAIT_SECONDS, which
-    // should be high enough for this to not be a problem. Note that we prevent duplicate messages
-    // to teachers via persistent IMAP message flags, but do not take special precautions against
-    // duplicate emails to parents. The latter case seems rather unlikely and much less serious.
-
-    await disposeImapClient();
-
-    const nowEpochMillis = Date.now();
-    const secondsSinceLastFailure = (nowEpochMillis - LAST_FAILURE_EPOCH_MILLIS) / 1000;
-    LOG.debug('Last failure was %d seconds ago', secondsSinceLastFailure);
-    if (secondsSinceLastFailure > BACKOFF_TRIGGER_SECONDS) { // reset wait time
-      RETRY_WAIT_SECONDS = DEFAULT_RETRY_WAIT_SECONDS;
-    } else { // exponential backoff
-      RETRY_WAIT_SECONDS =  Math.min(RETRY_WAIT_SECONDS * 2, MAX_RETRY_WAIT_SECONDS); 
-    }
-    LAST_FAILURE_EPOCH_MILLIS = nowEpochMillis;
-    LOG.info('Waiting %d seconds before retry', RETRY_WAIT_SECONDS);
-    await sleepSeconds(RETRY_WAIT_SECONDS);
-    LOG.debug('Waiting completed');
+    // At this point we have an error in the "surrounding" code, e.g. sending emails, writing the
+    // state file, launching Puppeteer. Of all these, only sending emails is relevant for how long
+    // we should wait before a retry; the rest is just local code. We simply use the configured wait
+    // interval between sending messages, which should ensure that we're never throttled.
+    LOG.info(`Waiting ${CONFIG.options.smtpWaitSeconds} seconds (SMTP wait time) before retry`);
+    await sleepSeconds(CONFIG.options.smtpWaitSeconds);
   }
 })();
