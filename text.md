@@ -20,6 +20,8 @@ General information such as substitution plan updates and upcoming events can be
 * **Integrates with email based workflows**<br>
 All information is in your email client, enabling a fully email-based two-way communication with teachers.
 * **Enables search in your email client**
+* **Integrates with Google Calendar**<br>
+Events can be added from the notification email with a single click.
 
 Primarily `*.eltern-portal.org` is supported:
 
@@ -109,7 +111,7 @@ These parameters are used to log into the Eltern-Portal. To disable Eltern-Porta
 * `url` The URL of your school's Eltern-Portal, e.g. `https://theogymuc.eltern-portal.org`
 * `user` The login email address
 * `pass` The login password
-* `tag` A short name used to identify the school in emails
+* `tag` A short name used to identify the school in emails and calendar events
 * `eventLookaheadDays` For notification of upcoming events. This controls how long in advance you (and possibly the student, see `emailToStudent`) are notified. Each event triggers only one notification, so e.g. 14 means you are notified two weeks in advance and have to keep it in mind from then on.
 * `messageSizeLimit` Emails you send to teachers are automatically split up if they exceed this length (in characters). The default is 512, but the actual limit may vary. Check your school's site, ask them or try it out.
 * `recipients` This controls who receives the different categories of messages. Each takes a comma-separated list of zero or more addresses, enclosed in `[]`.
