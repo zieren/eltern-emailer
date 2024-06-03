@@ -105,6 +105,7 @@ let STATUS_SERVER = null;
 // ---------- Initialization functions ----------
 
 async function maybeStartStatusServer() {
+  if (STATUS_SERVER) return;
   STATUS_SERVER = http.createServer((_, res) => {
     res.setHeader('Content-Type', 'text/plain');
     res.write(`${STATE.lastSuccessfulRun}`);
