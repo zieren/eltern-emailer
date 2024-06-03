@@ -146,7 +146,7 @@ IMAP support is optional and must be turned on via `incomingEmail.enabled` in th
 
 These control the behavior of Eltern-Emailer.
 
-* `customBrowserExecutable` A Chromium browser executable (full path) to use instead of the one bundled with Puppeteer. For Raspberry Pi OS (and possibly other Linuxes) this should be `chromium-browser`.
+* `customBrowserExecutable` A Chromium browser executable (full path) to use instead of the one bundled with Puppeteer. For Raspberry Pi OS (and possibly other Linuxes) this should be `/usr/bin/chromium-browser`.
 * `adminAddress` The sender (From:) used for all emails sent by the application. This is where bounced emails are delivered to, e.g. when the recipient's mailbox is full. Note that bounced emails typically contain the full content, i.e. possibly sensitive personal information. Error messages are also sent to this address.
 * `useBcc` Use `Bcc:` instead of `To:` when sending email to multiple recipients.
 * `incomingEmail` This groups options related to incoming email.
