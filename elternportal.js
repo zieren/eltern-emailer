@@ -629,7 +629,7 @@ async function readEvents(page, stateEP) {
       .map(e => { return { ...e, status: 0 }; })
       .sort((a, b) => a.ts - b.ts);
 
-  LOG.info(`${events.length} future events, of which ${upcomingEvents.length} in lookahead, `
+  LOG.info(`Found ${events.length} future events, of which ${upcomingEvents.length} in lookahead, `
     + `of which ${numNewEvents} new and ${numRemovedEvents} removed`);
 
   // Create emails.
