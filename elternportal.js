@@ -719,7 +719,8 @@ async function sendMessagesToTeachers(page) {
           } // else: We're already on the reply page.
         } else { // create a new thread
           await page.goto(
-            CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/' + msg.teacherId);
+            CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/' 
+            + msg.teacherId + '/_'); // A valid (!) name is required, and '_' is valid.
           await page.type('#new_betreff', msg.subject);
         }
 
@@ -762,7 +763,7 @@ async function sendMessagesToTeachers(page) {
           'Nachrichtenversand fehlgeschlagen',
           {
             text: `Nachricht an Lehrer ${msg.teacherId} konnte nicht gesendet werden.\n\n`
-              + `Fehler:\n${JSON.stringify(e)}\n\nWeitere Details im Logfile.`
+              + `Fehler:\n${e}\n\nWeitere Details im Logfile.`
           }),
         ok: () => {}
       });
