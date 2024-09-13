@@ -84,10 +84,10 @@ async function downloadFile(file, options) {
 async function loginElternPortal(page) {
   await page.goto(CONFIG.elternportal.url);
   await page.type('#inputEmail', CONFIG.elternportal.user);
-  await page.type('#inputPassword', CONFIG.elternportal.pass);
+  await page.type('#password', CONFIG.elternportal.pass);
   await Promise.all([
     page.waitForNavigation(),
-    page.click('#inputPassword ~ button')
+    page.click('#password ~ button')
   ]);
   // When settings are present, we are logged in.
   const success = await page.$$eval('a[href*="einstellungen"]', (a) => a.length) > 0;
