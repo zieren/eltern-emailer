@@ -313,6 +313,7 @@ function buildEmailsForThreads(teachers, processedThreads) {
           })
           if (i > 0) {
             email.references = [em.buildMessageId(messageIdBase + (i - 1))];
+            email.subject = 'Re: ' + email.subject; // subject is from website and never has 'Re:'
           }
           if (CONFIG.options.incomingEmail.forwardingAddress) {
             // We always put the teacher ID here, so the user can also reply to their own messages.
