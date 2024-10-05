@@ -38,6 +38,9 @@ const CLI_OPTIONS = {
   args: [],
   flags: [
     { name: 'config', type: 'string', default: 'config.json' },
+    // List of already processed (i.e. emailed) items. See EMPTY_STATE for content description.
+    { name: 'state', type: 'string', default: 'state.json' },
+    { name: 'no_sandbox', type: 'boolean' },
     { name: 'ep_password', type: 'string' },
     { name: 'sm_password', type: 'string' },
     { name: 'smtp_password', type: 'string' },
@@ -47,9 +50,6 @@ const CLI_OPTIONS = {
     { name: 'test', type: 'boolean' }
   ]
 };
-
-// List of already processed (i.e. emailed) items. See EMPTY_STATE for content description.
-const STATE_FILE = 'state.json';
 
 // State is global so that the status web server can access lastSuccessfulRun.
 let STATE = {};
@@ -125,8 +125,8 @@ function readConfigFile(flags) {
   createIncomingEmailRegExp();
 }
 
-function readState() {
-  STATE = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) : {};
+function readState(flags) {
+  STATE = fs.existsSync(flags.state) ? JSON.parse(fs.readFileSync(flags.state, 'utf-8')) : {};
   setEmptyState(STATE, EMPTY_STATE);
   LOG.debug('Read state');
 }
@@ -397,13 +397,16 @@ async function main() {
       return 0;
     }
     
-    readState();
+    readState(flags);
 
     // Launch Puppeteer. On the Raspberry Pi the browser executable is typically named
     // "chromium-browser", which must be specified. Other Linux systems may use "chromium".
     const puppeteerOptions = {headless: 'new'}; // prevent deprecation warning
     if (CONFIG.options.customBrowserExecutable) {
       puppeteerOptions.executablePath = CONFIG.options.customBrowserExecutable;
+    }
+    if (flags.no_sandbox) {
+      puppeteerOptions.args = ['--no-sandbox'];
     }
     BROWSER = await puppeteer.launch(puppeteerOptions);
     const page = await BROWSER.newPage();
@@ -438,7 +441,7 @@ async function main() {
         // to be resolved anyway.
         STATE.lastSuccessfulRun = NOW;
       }
-      fs.writeFileSync(STATE_FILE, JSON.stringify(STATE, null, 2));
+      fs.writeFileSync(flags.state, JSON.stringify(STATE, null, 2));
     }
 
     // Only close after OK handlers in the emails have run. Also wait for state to be persisted; if
