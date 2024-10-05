@@ -478,10 +478,10 @@ async function readNoticeBoard(page, previousHashes) {
   const subjects = await page.$$eval('div.well h4', hh => hh.map(h => h.innerHTML));
   const currentContents = await page.$$eval('div.well h4 ~ p', pp => pp.map(p => p.outerHTML));
   const archivedContents =
-    await page.$$eval('div.well div.row ~ div.row p', pp => pp.map(p => p.outerHTML));
+    await page.$$eval('div.well div.row ~ div.row p:first-child', pp => pp.map(p => p.outerHTML));
   const contents = currentContents.concat(archivedContents);
   if (subjects.length != contents.length) {
-    throw new Error(`Found ${subjects.length} subjects, but ${contents.length} contents`);
+    LOG.error(`Found ${subjects.length} subjects, but ${contents.length} contents`);
   }
 
   let newHashes = {};
