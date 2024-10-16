@@ -132,7 +132,7 @@ These parameters are used to log into Schulmanager. To disable Schulmanager, lea
 
 ### `smtp`
 
-These parameters configure the SMTP transport in the Nodemailer module. The full set of options described in the [Nodemailer documentation](https://nodemailer.com/smtp/) is available. The default values for `port` (465) and `secure` (true) work well for many servers (e.g. Outlook web mail), but yours may require different settings.
+These parameters configure the SMTP transport in the Nodemailer module. The full set of options described in the [Nodemailer documentation](https://nodemailer.com/smtp/) is available. The default values for `port` (465) and `secure` (true) should work for most servers.
 <a id="_imap"></a>
 
 ### `imap`
@@ -164,7 +164,7 @@ These control the behavior of Eltern-Emailer.
 
 ### Sending Messages to Teachers (Eltern-Portal Only)
 
-Eltern-Emailer can receive emails from you and forward them to teachers via the website. This requires a dedicated email account accessible via IMAP (see [`imap`](#_imap) above). The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. Outlook web mail is known to work.
+Eltern-Emailer can receive emails from you and forward them to teachers via the website. This requires a dedicated email account accessible via IMAP (see [`imap`](#_imap) above) using basic auth, i.e. username/password. OAuth, which most providers require these days, is not supported. The provider needs to support [subaddressing](https://en.wikipedia.org/wiki/Email_address#Subaddressing), i.e. `username+tag@example.com`. [Zoho Mail](http://zoho.com) is known to work.
 
 The website may limit the size of individual messages you send to teachers. If your email exceeds the limit, Eltern-Emailer automatically splits it up. The size limit is configurable (see `elternportal.messageSizeLimit` in [Configuration](#_configuration)) because it may vary between schools/installations. The default is 512 characters.
 <a id="_protection-against-abuse"></a>
