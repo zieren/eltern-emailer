@@ -191,10 +191,12 @@ async function readActiveTeachers(page, lastSuccessfulRun) {
     'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]:first-child',
     (anchors) => anchors.map(
       (a) => {
-        // Time here is in 12h format but missing any am/pm indicator (sic). We just use the date to
-        // find teachers with ~recent threads.
+        // We use just the date to find teachers with ~recent threads. This was originally because
+        // time here used to be in 12h format but missing any am/pm indicator (sic). Although it now
+        // seems to be 24h format we still use just the date: It's more robust and gives virtually
+        // the same optimization.
         const d = a.parentElement.innerText.match(/(\d\d)\.(\d\d).(\d\d\d\d)/);
-        const m = a.href.match(/.*\/(\d+)\/(.*)/);
+        const m = a.href.match(/.*\/(\d+)(\/|$)/);
         return {
           id: m[1],
           url: a.href,
@@ -685,7 +687,7 @@ async function readEvents(page, stateEP) {
 // ---------- Outgoing messages ----------
 
 async function sendMessagesToTeachers(page) {
-  LOG.info('Sending %d messages to teachers', OUTBOUND.length);
+  LOG.info('Sending %d message(s) to teachers', OUTBOUND.length);
   // Sidenote: Curiously navigation will always succeed, even for nonexistent teacher IDs. What's
   // more, we can actually send messages that we can then retrieve by navigating to the URL
   // directly. This greatly simplifies testing :-)
@@ -860,7 +862,7 @@ async function processNewEmail() {
       const subject = (parsedMessage.subject || '').trim() || '(kein Betreff)';
       const text = (parsedMessage.text || '').trim() || '(kein Text)';
       LOG.info(
-        'Received %s teacher %d%s: "%s" (%d characters; ID %d)',
+        'Received %s teacher %d%s: "%s" (%d characters; IMAP ID %d)',
         isReply ? 'reply to' : 'email for', teacherId,
         recipient.name ? ' (' + recipient.name + ')' : '',
         subject, text.length, message.seq);
