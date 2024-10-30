@@ -61,8 +61,8 @@ function haveOutbound() {
 async function downloadFile(file, options) {
   // Collect buffers and use Buffer.concat() to avoid chunk size arithmetics.
   let buffers = [];
-  // It seems attachment downloads don't need to be throttled.
   await new Promise((resolve, reject) => {
+    // Downloads are throttled at the call sites. Otherwise we may see socket errors.
     https.get(file.url, options, (response) => {
       file.filename =
         contentDisposition.parse(response.headers['content-disposition']).parameters.filename;
@@ -76,6 +76,10 @@ async function downloadFile(file, options) {
       reject(error);
     });
   });
+}
+
+function sleepSeconds(seconds) {
+  return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
 
 // ---------- Login ----------
@@ -140,9 +144,14 @@ async function readAnnouncements(page) {
  */
 async function readAnnouncementsAttachments(page, announcements, processedAnnouncements) {
   let options = null;
+  let wait = false;
   for (const a of announcements.filter(a => a.url && !(a.id in processedAnnouncements))) {
     options ||= {headers: {'Cookie': await getPhpSessionIdAsCookie(page)}};
+    if (wait) {
+      await sleepSeconds(CONFIG.elternportal.fileDownloadWaitSeconds);
+    }
     await downloadFile(a, options);
+    wait = true;
     LOG.info('Read attachment (%d kb) for: %s', a.content.length >> 10, a.subject);
   }
 }
@@ -277,13 +286,18 @@ async function readThreadsContents(page, teachers) {
 
 async function readThreadsAttachments(page, teachers, processedThreads) {
   let options = null;
+  let wait = false;
   for (const teacher of teachers) {
     for (const thread of teacher.threads) {
       for (let i = 0; i < thread.messages.length; ++i) {
         if (!(thread.id in processedThreads) || !(i in processedThreads[thread.id])) {
           for (const file of thread.messages[i].attachments) {
             options ||= { headers: { 'Cookie': await getPhpSessionIdAsCookie(page) } };
+            if (wait) {
+              await sleepSeconds(CONFIG.elternportal.fileDownloadWaitSeconds);
+            }
             await downloadFile(file, options);
+            wait = true;
             LOG.info('Read attachment (%d kb) from "%s" in "%s"', // only teachers can attach files
               file.content.length >> 10, teacher.nameForLogging, thread.subject);
           }

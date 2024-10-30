@@ -7,6 +7,7 @@
     "eventLookaheadDays": 7,
     "messageSizeLimit": 512,
     "timeoutSeconds": 0,
+    "fileDownloadWaitSeconds": 0.5,
     "recipients": {
       "*": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."],
       "lehrerkommunikation": [],
