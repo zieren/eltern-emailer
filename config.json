@@ -6,6 +6,7 @@
     "tag": "SHORT NAME IN EMAIL SENDER AND CALENDAR EVENTS",
     "eventLookaheadDays": 7,
     "messageSizeLimit": 512,
+    "timeoutSeconds": 0,
     "recipients": {
       "*": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."],
       "lehrerkommunikation": [],
@@ -19,6 +20,7 @@
     "user": "EMAIL ADDRESS FOR LOGIN",
     "pass": "PASSWORD",
     "tag": "SHORT NAME IN EMAIL SENDER",
+    "timeoutSeconds": 60,
     "recipients": {
       "*": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."],
       "elternbriefe": []

@@ -106,7 +106,7 @@ The following sections describe the homonymous parts in the `config.json` file. 
 
 ### `elternportal`
 
-These parameters are used to log into the Eltern-Portal. To disable Eltern-Portal, leave the defaults unchanged or remove the whole `elternportal` section.
+These parameters are used to process Eltern-Portal. To disable Eltern-Portal, leave the defaults unchanged or remove the whole `elternportal` section.
 
 * `url` The URL of your school's Eltern-Portal, e.g. `https://theogymuc.eltern-portal.org`
 * `user` The login email address
@@ -114,6 +114,7 @@ These parameters are used to log into the Eltern-Portal. To disable Eltern-Porta
 * `tag` A short name used to identify the school in emails and calendar events
 * `eventLookaheadDays` For notification of upcoming events. This controls how long in advance you (and possibly the student, see `emailToStudent`) are notified. Each event triggers only one notification, so e.g. 14 means you are notified two weeks in advance and have to keep it in mind from then on.
 * `messageSizeLimit` Emails you send to teachers are automatically split up if they exceed this length (in characters). The default is 512, but the actual limit may vary. Check your school's site, ask them or try it out.
+* `timeoutSeconds` This specifies the page timeout (e.g. for navigation). If absent or zero, the default is used (30s).
 * `recipients` This controls who receives the different categories of messages. Each takes a comma-separated list of zero or more addresses, enclosed in `[]`.
   * `*` Receives everything
   * `lehrerkommunikation` Personal messages from teachers to parents ("Kommunikation Eltern/Fachlehrer" and ".../Klassenleitung")
@@ -121,11 +122,12 @@ These parameters are used to log into the Eltern-Portal. To disable Eltern-Porta
 
 ### `schulmanager`
 
-These parameters are used to log into Schulmanager. To disable Schulmanager, leave the defaults unchanged or remove the whole `schulmanager` section.
+These parameters are used to process Schulmanager. To disable Schulmanager, leave the defaults unchanged or remove the whole `schulmanager` section.
 
 * `user` The login email address
 * `pass` The login password
 * `tag` A short name used to identify the school in emails
+* `timeoutSeconds` This specifies the page timeout (e.g. for navigation). If absent or zero, the default is used (30s).
 * `recipients` This controls who receives the different categories of messages. Each takes a comma-separated list of zero or more addresses, enclosed in `[]`.
   * `*` Receives everything (though there is currently only one category, but more may be added in later versions)
   * `elternbriefe` Self-explanatory
