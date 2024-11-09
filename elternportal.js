@@ -729,15 +729,14 @@ async function sendMessagesToTeachers(page) {
         if (msg.replyThreadId) {
           if (!onReplyPage) {
             await page.goto(
-              CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/'
-              + msg.teacherId + '/_/' + msg.replyThreadId);
+              `${CONFIG.elternportal.url}/meldungen/kommunikation_fachlehrer/` +
+              `${msg.teacherId}/${msg.replyThreadId}`);
             // We probably don't need load_all=1 here, assuming the reply box is always shown.
             onReplyPage = true; // The form remains available after posting the reply.
           } // else: We're already on the reply page.
         } else { // create a new thread
           await page.goto(
-            CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer/' 
-            + msg.teacherId + '/_'); // A valid (!) name is required, and '_' is valid.
+            `${CONFIG.elternportal.url}/meldungen/kommunikation_fachlehrer/${msg.teacherId}`);
           await page.type('#new_betreff', msg.subject);
         }
 
