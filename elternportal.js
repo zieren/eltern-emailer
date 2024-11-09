@@ -205,16 +205,18 @@ async function readActiveTeachers(page, lastSuccessfulRun) {
         // seems to be 24h format we still use just the date: It's more robust and gives virtually
         // the same optimization.
         const d = a.parentElement.innerText.match(/(\d\d)\.(\d\d).(\d\d\d\d)/);
-        const m = a.href.match(/.*\/(\d+)(\/|$)/);
+        const id = a.href.match(/.*\/(\d+)$/)[1];
+        // This may be specific to our school: EP displays a teacher's name in many different
+        // variations. We can easily get one here, but it is dirtier than others: It is in "Last,
+        // First" order, and some roles (e.g. director) are added after the name. It can also have
+        // newlines and for some reason often has a trailing comma. Later on we can get a cleaner
+        // version, so we use this just for logging.
+        const nameForLogging = a.parentElement.parentElement.firstChild.innerText
+            .replace(/\n|(,$)/g, ' ').trim();
         return {
-          id: m[1],
+          id: id,
           url: a.href,
-          // This may be specific to our school: EP displays a teacher's name in many different
-          // variations. We can easily get one here, but it is dirtier than others: It is in "Last,
-          // First" order, and some roles (e.g. director) are added after the name, separated by
-          // "<br>", which is %-encoded. We strip that here, but keep the reverse order. Later on we
-          // can get the name in forward order, so we use this only for logging.
-          nameForLogging: decodeURIComponent(m[2]).replace(/<.*/, '').replace(/[+_]/g, ' '),
+          nameForLogging: nameForLogging,
           // We add two days to the date to account for a) lacking time of day, b) timezones, and c)
           // clock skew. There is no need to cut it close, the performance gain would not outweigh
           // complexity.
@@ -232,25 +234,35 @@ async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
   for (const teacher of teachers) {
     LOG.debug('Reading threads with %s', teacher.nameForLogging);
     await page.goto(teacher.url);
+    // It's brittle to extract the teacher name using (possibly localized) text content, but in our
+    // school the name here is cleaner than the one in the overview. We fall back to the latter if
+    // this fails.
+    const name = await page.$eval('form div h2',
+        h2 => {
+          const n = h2.innerText.match(/Kommunikation mit (.+) im Schuljahr .*/);
+          return n ? n[1] : null;
+        }
+      ) 
+      || teacher.nameForLogging;
     teacher.threads = (await page.$$eval(
       'a[href*="meldungen/kommunikation_fachlehrer/"]',
       (anchors) => anchors.map((a) => {
         // See matching comments in readActiveTeachers() above.
         const d = a.parentElement.previousSibling.textContent.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
-        // Extract teacher name and thread ID. In our school the teacher name used here is clean
-        // and in "first name first" order. First and last name are separated by '_'.
-        const m = a.href.match(/.*\/([^\/]*)\/(\d+)$/);
+        const id = a.href.match(/.*\/(\d+)$/)[1];
         return {
-          id: m[2],
+          id: id,
           url: a.href,
-          // Not sure I've seen quotes or newlines; just trying to ensure an RFC2822 valid name.
-          teacherName: decodeURIComponent(m[1]).replace(/[+"\n_]/g, ' '),
           subject: a.textContent,
           // See matching comments in readActiveTeachers() above.
           latest: new Date(d[3], d[2] - 1, parseInt(d[1]) + 2).getTime()
         };
       })))
-      .filter(t => t.latest >= lastSuccessfulRun);
+      .filter(t => t.latest >= lastSuccessfulRun)
+      .map(t => { 
+        t.teacherName = name;
+        return t;
+      });
   }
 }
 
