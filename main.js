@@ -264,13 +264,13 @@ async function createImapClient() {
       .on('mailboxOpen', async () => {
         // This will run before the 'exists' handler below.
         LOG.debug('Mailbox opened, checking for new messages...');
-        if (await ep.processNewEmail()) {
+        if (!elternPortalConfigured() || await ep.processNewEmail()) {
           awake();
         }
       })
       .on('exists', async (data) => {
         LOG.info('Received new message(s): %s', JSON.stringify(data));
-        if (await ep.processNewEmail()) {
+        if (!elternPortalConfigured() || await ep.processNewEmail()) {
           awake();
         }
       })
