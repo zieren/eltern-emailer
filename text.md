@@ -232,6 +232,28 @@ To try it out, manually remove one line in `state.json`, e.g. the first line aft
 
 The `SIGTERM` signal can be used to do a graceful shutdown (which may take a few seconds).
 
+### Running as a docker container
+
+If you want to run this application in a docker container, you first have to build it:
+
+```
+docker build -t eltern-emailer .
+```
+
+You need a storage directory for the `state.json`:
+
+```
+mkdir -p $PWD/data/
+```
+
+Then you can run it like this:
+
+```
+docker run -it -p 1984:1984 --name eltern-emailer --rm --init \
+ --mount type=bind,source=$PWD/config.json,target=/conf/config.json \
+ --volume $PWD/data/:/data/ eltern-emailer
+```
+
 ## Flags
 
 The following flags are supported:
@@ -240,6 +262,8 @@ The following flags are supported:
 * `--mute` See [Configuration: options](#_options) above.
 * `--test` See [Configuration: options](#_options) above.
 * `--config=file.json` Set the config filename.
+* `--state=state.json` Set the state filename.
+* `--no_sandbox` Run Puppeteer in [no-sandbox mode](https://github.com/puppeteer/puppeteer/blob/main/docs/troubleshooting.md) so [not requiring capability SYS_ADMIN](https://lwn.net/Articles/486306/), needed when [running in an unprivileged docker container](https://pptr.dev/guides/docker)
 * `--ep_password=abc123` Specify the Eltern-Portal login password.
 * `--sm_password=abc123` Specify the Schulmanager login password.
 * `--smtp_password=abc123` Specify the SMTP server password.
