@@ -69,10 +69,10 @@ Schools use different feature subsets. If a feature is missing for your school, 
 The following sections in the web UI are supported:
 
 * `Aktuelles`
-* `Kommunikation Eltern/Fachlehrer`
+* `Kommunikation Eltern/Fachlehrer` (including attachments)
 * `Kommunikation Eltern/Klassenleitung`
 * `Klassen Vertretungsplan`
-* `Schwarzes Brett`
+* `Schwarzes Brett` (no support for attachments yet)
 * `Schulaufgaben / Weitere Termine`
 
 #### Schulmanager
