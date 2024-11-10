@@ -65,7 +65,7 @@ async function downloadFile(file, options) {
     // Downloads are throttled at the call sites. Otherwise we may see socket errors.
     https.get(file.url, options, (response) => {
       file.filename =
-        contentDisposition.parse(response.headers['content-disposition']).parameters.filename;
+          contentDisposition.parse(response.headers['content-disposition']).parameters.filename;
       response.on('data', (buffer) => {
         buffers.push(buffer);
       }).on('end', () => {
@@ -122,7 +122,7 @@ async function readAnnouncements(page) {
       (n) => {
         // Transform the date to a format that Date can parse.
         const d = n.firstChild.nextSibling.textContent // it's a text node
-          .match(/(\d\d)\.(\d\d)\.(\d\d\d\d) +(\d\d:\d\d:\d\d)/);
+            .match(/(\d\d)\.(\d\d)\.(\d\d\d\d) +(\d\d:\d\d:\d\d)/);
         return {
           // Use the ID also used for reading confirmation, because it should be stable.
           id: n.attributes.onclick.textContent.match(/\((\d+)\)/)[1],
@@ -158,73 +158,73 @@ async function readAnnouncementsAttachments(page, announcements, processedAnnoun
 
 function buildEmailsForAnnouncements(page, announcements, processedAnnouncements) {
   announcements
-    .filter(a => !(a.id in processedAnnouncements))
-    // Send oldest announcements first, i.e. maintain chronological order. This is not reliable
-    // because emails race, but GMail ignores the carefully forged message creation date (it shows
-    // the reception date instead), so it's the best we can do.
-    .reverse()
-    .map(a => {
-      const email = em.buildEmailEpAnnouncements(a.subject, {
-        text: a.body,
-        date: new Date(a.dateString)});
-      if (a.content) {
-        email.attachments = [
-          {
-            filename: a.filename,
-            content: a.content
-          }
-        ];
-      }
-      return {
-        email: email,
-        ok: async () => {
-          // Navigate to /elternbriefe to load the confirmation JS (function eb_bestaetigung()).
-          if (!page.url().endsWith('/aktuelles/elternbriefe')) {
-            await page.goto(CONFIG.elternportal.url + '/aktuelles/elternbriefe');
-          }
-          await page.evaluate((id) => { eb_bestaetigung(id); }, a.id);
-          processedAnnouncements[a.id] = 1;
+      .filter(a => !(a.id in processedAnnouncements))
+      // Send oldest announcements first, i.e. maintain chronological order. This is not reliable
+      // because emails race, but GMail ignores the carefully forged message creation date (it shows
+      // the reception date instead), so it's the best we can do.
+      .reverse()
+      .map(a => {
+        const email = em.buildEmailEpAnnouncements(a.subject, {
+          text: a.body,
+          date: new Date(a.dateString)});
+        if (a.content) {
+          email.attachments = [
+            {
+              filename: a.filename,
+              content: a.content
+            }
+          ];
         }
-      };
-    }).forEach(e => INBOUND.push(e));
+        return {
+          email: email,
+          ok: async () => {
+            // Navigate to /elternbriefe to load the confirmation JS (function eb_bestaetigung()).
+            if (!page.url().endsWith('/aktuelles/elternbriefe')) {
+              await page.goto(CONFIG.elternportal.url + '/aktuelles/elternbriefe');
+            }
+            await page.evaluate((id) => { eb_bestaetigung(id); }, a.id);
+            processedAnnouncements[a.id] = 1;
+          }
+        };
+      }).forEach(e => INBOUND.push(e));
 }
 
 // ---------- Threads ----------
 
 // Returns a list of teachers with at least one recent thread.
 async function readActiveTeachers(page, lastSuccessfulRun) {
-  await page.goto(CONFIG.elternportal.url + '/meldungen/kommunikation_fachlehrer');
+  await page.goto(`${CONFIG.elternportal.url}/meldungen/kommunikation_fachlehrer`);
   const teachers = (await page.$$eval(
-    // New messages cause a "Neu" indicator with the same href as the teacher. The :first-child
-    // selector prevents duplicates from that.
-    'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]:first-child',
-    (anchors) => anchors.map(
-      (a) => {
-        // We use just the date to find teachers with ~recent threads. This was originally because
-        // time here used to be in 12h format but missing any am/pm indicator (sic). Although it now
-        // seems to be 24h format we still use just the date: It's more robust and gives virtually
-        // the same optimization.
-        const d = a.parentElement.innerText.match(/(\d\d)\.(\d\d).(\d\d\d\d)/);
-        const id = a.href.match(/.*\/(\d+)$/)[1];
-        // This may be specific to our school: EP displays a teacher's name in many different
-        // variations. We can easily get one here, but it is dirtier than others: It is in "Last,
-        // First" order, and some roles (e.g. director) are added after the name. It can also have
-        // newlines and for some reason often has a trailing comma. Later on we can get a cleaner
-        // version, so we use this just for logging.
-        const nameForLogging = a.parentElement.parentElement.firstChild.innerText
-            .replace(/\n|(,$)/g, ' ').trim();
-        return {
-          id: id,
-          url: a.href,
-          nameForLogging: nameForLogging,
-          // We add two days to the date to account for a) lacking time of day, b) timezones, and c)
-          // clock skew. There is no need to cut it close, the performance gain would not outweigh
-          // complexity.
-          latest: new Date(d[3], d[2] - 1, parseInt(d[1]) + 2).getTime()
-        };
-      })))
-    .filter(a => a.latest >= lastSuccessfulRun);
-  LOG.info('Found %d teachers with recent threads', teachers.length);
+      // New messages cause a "Neu" indicator with the same href as the teacher. The :first-child
+      // selector prevents duplicates from that.
+      'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]:first-child',
+      anchors => anchors.map(
+        a => {
+          // We use just the date to find teachers with ~recent threads. This was originally because
+          // time here used to be in 12h format but missing any am/pm indicator (sic). Although it
+          // now seems to be 24h format we still use just the date: It's more robust and gives
+          // virtually the same optimization.
+          const d = a.parentElement.innerText.match(/(\d\d)\.(\d\d).(\d\d\d\d)/);
+          const id = a.href.match(/.*\/(\d+)$/)[1];
+          // This may be specific to our school: EP displays a teacher's name in many different
+          // variations. We can easily get one here, but it is dirtier than others: It is in "Last,
+          // First" order, and some roles (e.g. director) are added after the name. It can also have
+          // newlines and for some reason often has a trailing comma. Later on we can get a cleaner
+          // version, so we use this just for logging.
+          const nameForLogging = a.parentElement.parentElement.firstChild.innerText
+              .replace(/\n|(,$)/g, ' ').trim();
+          return {
+            id: id,
+            url: a.href,
+            nameForLogging: nameForLogging,
+            // We add two days to the date to account for a) lacking time of day, b) timezones, and
+            // c) clock skew. There is no need to cut it close, the performance gain would not
+            // outweigh complexity.
+            latest: new Date(d[3], d[2] - 1, parseInt(d[1]) + 2).getTime()
+          };
+        })))
+      .filter(a => a.latest >= lastSuccessfulRun);
+  LOG.info(`Found ${teachers.length} teachers with recent threads`);
   return teachers;
 }
 
@@ -232,7 +232,7 @@ async function readActiveTeachers(page, lastSuccessfulRun) {
 // Threads are stored with key 'threads' for each teacher.
 async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
   for (const teacher of teachers) {
-    LOG.debug('Reading threads with %s', teacher.nameForLogging);
+    LOG.debug(`Reading threads with ${teacher.nameForLogging}`);
     await page.goto(teacher.url);
     // It's brittle to extract the teacher name using (possibly localized) text content, but in our
     // school the name here is cleaner than the one in the overview. We fall back to the latter if
@@ -241,12 +241,11 @@ async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
         h2 => {
           const n = h2.innerText.match(/Kommunikation mit (.+) im Schuljahr .*/);
           return n ? n[1] : null;
-        }
-      ) 
-      || teacher.nameForLogging;
+        })
+        || teacher.nameForLogging;
     teacher.threads = (await page.$$eval(
       'a[href*="meldungen/kommunikation_fachlehrer/"]',
-      (anchors) => anchors.map((a) => {
+      anchors => anchors.map((a) => {
         // See matching comments in readActiveTeachers() above.
         const d = a.parentElement.previousSibling.textContent.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
         const id = a.href.match(/.*\/(\d+)$/)[1];
@@ -275,7 +274,7 @@ async function readThreadsContents(page, teachers) {
     for (const thread of teacher.threads) {
       await page.goto(thread.url + '?load_all=1'); // Prevent pagination (I hope).
       thread.messages = await page.$eval('div#last_messages',
-        (div) => Array.from(div.children).map(row => {
+        div => Array.from(div.children).map(row => {
           // I believe we can have multiple attachments, but I found no occurrence to verify.
           const attachments = Array.from(row.querySelectorAll('a.link_nachrichten'))
             .map(a => { return { url: a.href };});
@@ -311,7 +310,7 @@ async function readThreadsAttachments(page, teachers, processedThreads) {
             await downloadFile(file, options);
             wait = true;
             LOG.info('Read attachment (%d kb) from "%s" in "%s"', // only teachers can attach files
-              file.content.length >> 10, teacher.nameForLogging, thread.subject);
+                file.content.length >> 10, teacher.nameForLogging, thread.subject);
           }
         }
       }
@@ -396,7 +395,7 @@ async function readInquiries(page) {
         messages: messages
       };
     })));
-  LOG.info('Found %d inquiries', inquiries.length);
+  LOG.info(`Found ${inquiries.length} inquiries`);
   // Order is reverse chronological, make it forward.
   return inquiries.reverse();
 }
@@ -410,13 +409,13 @@ function buildEmailsForInquiries(inquiries, state) {
       prunedHashes[hash] = 1;
       if (!state.inquiries[hash]) {
         const email = em.buildEmailEpThreads(
-          INQUIRY_AUTHOR[Math.min(j, 2)],
-          inquiry.subject,
-          {
-            messageId: em.buildMessageId(`inquiry-${hash}`),
-            text: message.text,
-            date: new Date(message.date)
-          });
+            INQUIRY_AUTHOR[Math.min(j, 2)],
+            inquiry.subject,
+            {
+              messageId: em.buildMessageId(`inquiry-${hash}`),
+              text: message.text,
+              date: new Date(message.date)
+            });
         if (previousHash) {
           email.references = [em.buildMessageId(`inquiry-${previousHash}`)];
         }
@@ -437,31 +436,31 @@ async function readSubstitutions(page, previousHashes) {
   await page.goto(CONFIG.elternportal.url + '/service/vertretungsplan');
   // For our school most lines are duplicated, with explicitly altering CSS for the TR. Remove these
   // duplicates.
-  await page.$$eval('div#asam_content div.main_center table.table tr', (trs) => trs.forEach(tr => {
+  await page.$$eval('div#asam_content div.main_center table.table tr', trs => trs.forEach(tr => {
     if (tr.previousElementSibling && tr.previousElementSibling.innerHTML === tr.innerHTML) {
       tr.parentElement.removeChild(tr);
     }
   }));
   // We use a day granularity to handle the case where a day disappears because it's past.
   const substitutions = await page.$$eval(
-    'div#asam_content div.main_center div.list.bold', // find headings
-    divs => divs.map(div => {
-      const m = div.innerText.match(/\b(\d\d?)\.(\d\d?)\.(\d\d(\d\d)?)\b/);
-      const table = div.nextElementSibling; // actual substitution table
-      if (!m || table.nodeName !== 'TABLE' || !table.classList.contains("table")) {
-        throw new Error('Unexpected substitution plan format');
-      }
-      // Expiration is beginning of next (+1) day (this works across months). We can't use
-      // global.NOW in page context.
-      const expired = Date.now() >= new Date(m[3], m[2] - 1, m[1] + 1).getTime();
-      // There is no value in sending an empty plan. ISTM our school has a lookahead of two days,
-      // so at midnight a new day appears. AFAICT that day is always empty, maybe because the
-      // secretary needs to approve the plan manually.
-      const empty = table.rows.length <= 1;
-      return expired || empty
-        ? null // filtered below
-        : { html: `${div.outerHTML}\n${table.outerHTML}\n` };
-    }).filter(s => s !== null));
+      'div#asam_content div.main_center div.list.bold', // find headings
+      divs => divs.map(div => {
+        const m = div.innerText.match(/\b(\d\d?)\.(\d\d?)\.(\d\d(\d\d)?)\b/);
+        const table = div.nextElementSibling; // actual substitution table
+        if (!m || table.nodeName !== 'TABLE' || !table.classList.contains("table")) {
+          throw new Error('Unexpected substitution plan format');
+        }
+        // Expiration is beginning of next (+1) day (this works across months). We can't use
+        // global.NOW in page context.
+        const expired = Date.now() >= new Date(m[3], m[2] - 1, m[1] + 1).getTime();
+        // There is no value in sending an empty plan. ISTM our school has a lookahead of two days,
+        // so at midnight a new day appears. AFAICT that day is always empty, maybe because the
+        // secretary needs to approve the plan manually.
+        const empty = table.rows.length <= 1;
+        return expired || empty
+          ? null // filtered below
+          : { html: `${div.outerHTML}\n${table.outerHTML}\n` };
+      }).filter(s => s !== null));
   let newHashes = {};
   let haveUpdates = false;
   substitutions.forEach(sub => {
@@ -481,7 +480,7 @@ async function readSubstitutions(page, previousHashes) {
     contentHTML += html;
   });
   contentHTML += // Append last updated time. Only needed when there actually are updates.
-    await page.$eval('div#asam_content div.main_center > div:last-of-type', div => div.outerHTML);
+      await page.$eval('div#asam_content div.main_center > div:last-of-type', div => div.outerHTML);
   const fullHTML = `<!DOCTYPE html><html><head><title>Vertretungsplan</title>
       <style>
         table, td { border: 1px solid; } 
@@ -499,14 +498,15 @@ async function readSubstitutions(page, previousHashes) {
 // ---------- Notice board ----------
 
 async function readNoticeBoard(page, previousHashes) {
-  await page.goto(CONFIG.elternportal.url + '/aktuelles/schwarzes_brett');
+  await page.goto(`${CONFIG.elternportal.url}/aktuelles/schwarzes_brett`);
   // We extract both current and archived items, because an item may have been published and 
   // archived since the last run (e.g. vacation or other local downtime). To make sure hashes are
   // stable we need to do some contortions.
   const subjects = await page.$$eval('div.well h4', hh => hh.map(h => h.innerHTML));
   const currentContents = await page.$$eval('div.well h4 ~ p', pp => pp.map(p => p.outerHTML));
-  const archivedContents =
-    await page.$$eval('div.arch div.well div.row ~ div.row p:first-child', pp => pp.map(p => p.outerHTML));
+  const archivedContents = await page.$$eval(
+      'div.arch div.well div.row ~ div.row p:first-child',
+      pp => pp.map(p => p.outerHTML));
   const contents = currentContents.concat(archivedContents);
   if (subjects.length != contents.length) {
     throw new Error(`Found ${subjects.length} subjects, but ${contents.length} contents`);
@@ -538,14 +538,14 @@ async function readNoticeBoard(page, previousHashes) {
 // ---------- Events ----------
 
 async function readEventsInternal(page) {
-  let events = await page.$$eval('table.table2 td:nth-last-child(3)', (tds) => tds.map(td => {
+  let events = await page.$$eval('table.table2 td:nth-last-child(3)', tds => tds.map(td => {
     // Shortcuts.
     const dateTD = td;
     const timeTD = td.nextSibling;
     const descriptionTD = td.nextSibling.nextSibling;
     // Remove year because it's obvious, and use non-breaking hyphen to keep date and time on a
     // single line for better readability.
-    const compactDateTime = (s) => s.replace(/( |20\d\d)/g, '').replace(/-/g, '&#8209;');
+    const compactDateTime = s => s.replace(/( |20\d\d)/g, '').replace(/-/g, '&#8209;');
 
     // Our school sometimes specifies invalid date ranges ("24.12.-23.12."). Logically, i.e. for
     // sorting and identifying upcoming/past events, we only use the start (first) date and ignore
@@ -555,7 +555,7 @@ async function readEventsInternal(page) {
     // will have to be edited before the event is accepted by Google Calendar. If this happens
     // frequently we should set the end date to the start date.
 
-    let d = td.textContent.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)(.+(\d\d)\.(\d\d)\.(\d\d\d\d))?/);
+    const d = td.textContent.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)(.+(\d\d)\.(\d\d)\.(\d\d\d\d))?/);
     // The date should always parse, otherwise we can't really handle the event.
     if (!d) {
       // Errors are handled in handleEventsWithErrors() because we're only in page context here.
@@ -637,9 +637,9 @@ async function readEvents(page, stateEP) {
   lookaheadDate.setDate(lookaheadDate.getDate() + CONFIG.elternportal.eventLookaheadDays);
   const lookaheadTs = lookaheadDate.getTime();
   let upcomingEvents = events
-    .filter(e => e.ts >= todayZeroTs && e.ts <= lookaheadTs)
-    // See TR_AND_STATUS for status codes.
-    .map(e => { return { ...e, status: containsEvent(stateEP.events, e) ? 0 : 1 }; });
+      .filter(e => e.ts >= todayZeroTs && e.ts <= lookaheadTs)
+      // See TR_AND_STATUS for status codes.
+      .map(e => { return { ...e, status: containsEvent(stateEP.events, e) ? 0 : 1 }; });
   const numNewEvents = upcomingEvents.filter(e => e.status == 1).length;
 
   // Find removed events. stateEP.events has been pruned above, so anything it contains that is no
@@ -659,7 +659,7 @@ async function readEvents(page, stateEP) {
       .sort((a, b) => a.ts - b.ts);
 
   LOG.info(`Found ${events.length} future events, of which ${upcomingEvents.length} in lookahead, `
-    + `of which ${numNewEvents} new and ${numRemovedEvents} removed`);
+      + `of which ${numNewEvents} new and ${numRemovedEvents} removed`);
 
   // Create emails.
   if (!(numNewEvents + numRemovedEvents)) {
@@ -713,7 +713,7 @@ async function readEvents(page, stateEP) {
 // ---------- Outgoing messages ----------
 
 async function sendMessagesToTeachers(page) {
-  LOG.info('Sending %d message(s) to teachers', OUTBOUND.length);
+  LOG.info(`Sending ${OUTBOUND.length} message(s) to teachers`);
   // Sidenote: Curiously navigation will always succeed, even for nonexistent teacher IDs. What's
   // more, we can actually send messages that we can then retrieve by navigating to the URL
   // directly. This greatly simplifies testing :-)
@@ -731,8 +731,8 @@ async function sendMessagesToTeachers(page) {
     // In case of multiple messages we prefix them with "[n/N] ". Assuming that n and N have at
     // most 2 characters, we simply substract 8 characters for every such prefix.
     const capacity = msg.text.length <= CONFIG.elternportal.messageSizeLimit
-      ? CONFIG.elternportal.messageSizeLimit
-      : (CONFIG.elternportal.messageSizeLimit - 8);
+        ? CONFIG.elternportal.messageSizeLimit
+        : (CONFIG.elternportal.messageSizeLimit - 8);
     const numParts = Math.ceil(msg.text.length / capacity);
     let onReplyPage = false;
 
@@ -741,21 +741,21 @@ async function sendMessagesToTeachers(page) {
         if (msg.replyThreadId) {
           if (!onReplyPage) {
             await page.goto(
-              `${CONFIG.elternportal.url}/meldungen/kommunikation_fachlehrer/` +
-              `${msg.teacherId}/${msg.replyThreadId}`);
+                `${CONFIG.elternportal.url}/meldungen/kommunikation_fachlehrer/` +
+                `${msg.teacherId}/${msg.replyThreadId}`);
             // We probably don't need load_all=1 here, assuming the reply box is always shown.
             onReplyPage = true; // The form remains available after posting the reply.
           } // else: We're already on the reply page.
         } else { // create a new thread
           await page.goto(
-            `${CONFIG.elternportal.url}/meldungen/kommunikation_fachlehrer/${msg.teacherId}`);
+              `${CONFIG.elternportal.url}/meldungen/kommunikation_fachlehrer/${msg.teacherId}`);
           await page.type('#new_betreff', msg.subject);
         }
 
         const prefix = numParts == 1 ? '' : '[' + (i + 1) + '/' + numParts + '] ';
         const logInfix = numParts == 1 ? '' : ' part ' + (i + 1) + '/' + numParts;
         await page.type(
-          '#nachricht_kom_fach', prefix + msg.text.substring(i * capacity, (i + 1) * capacity));
+            '#nachricht_kom_fach', prefix + msg.text.substring(i * capacity, (i + 1) * capacity));
 
         // We mark the original email done before actually submitting the form to avoid duplicate 
         // messages in case of errors. Unfortunately one incoming email may map to multiple parts,
@@ -781,11 +781,11 @@ async function sendMessagesToTeachers(page) {
               (a) => a.href.match(/.*\/(\d+)$/)[1]);
           }
         } else {
-          throw '' + response.status() + ' ' + response.statusText();
+          throw `${response.status()} ${response.statusText()}`;
         }
       }
     } catch (e) {
-      LOG.error('Failed to send message to teacher %d: %s', msg.teacherId, e);
+      LOG.error(`Failed to send message to teacher ${msg.teacherId}: ${e}`);
       INBOUND.push({
         email: em.buildEmailAdmin(
           'Nachrichtenversand fehlgeschlagen',
@@ -825,14 +825,14 @@ async function processNewEmail() {
     const parsedMessage = await simpleParser(message.source);
 
     const recipients = [].concat(
-      parsedMessage.to ? parsedMessage.to.value : [],
-      // The portal doesn't support the concept of multiple recipients, but we do. We treat To:
-      // and Cc: the same.
-      parsedMessage.cc ? parsedMessage.cc.value : [])
-      // The user may have set up forwarding from some easy-to-guess address (e.g. the one
-      // initially registered with the portal), exposing the address to spam or pranks. To be safe
-      // we check for the secret, hard-to-guess address.
-      .filter(value => value.address && value.address.match(CONFIG.options.incomingEmail.regEx));
+        parsedMessage.to ? parsedMessage.to.value : [],
+        // The portal doesn't support the concept of multiple recipients, but we do. We treat To:
+        // and Cc: the same.
+        parsedMessage.cc ? parsedMessage.cc.value : [])
+        // The user may have set up forwarding from some easy-to-guess address (e.g. the one
+        // initially registered with the portal), exposing the address to spam or pranks. To be safe
+        // we check for the secret, hard-to-guess address.
+        .filter(value => value.address && value.address.match(CONFIG.options.incomingEmail.regEx));
 
     if (!recipients.length) {
       continue; // The message isn't intended for a teacher.
@@ -866,9 +866,9 @@ async function processNewEmail() {
     // need a subject. Other teachers may be among the recipients though, for these a new thread is
     // created.
     [_, replyTeacherId, replyThreadId] =
-      parsedMessage.inReplyTo && parsedMessage.inReplyTo.startsWith('<thread-')
-        ? parsedMessage.inReplyTo.split('-')
-        : [0, -1, -1];
+        parsedMessage.inReplyTo && parsedMessage.inReplyTo.startsWith('<thread-')
+            ? parsedMessage.inReplyTo.split('-')
+            : [0, -1, -1];
 
     for (const recipient of recipients) {
       const teacherId = recipient.address.match(CONFIG.options.incomingEmail.regEx)[1];
@@ -887,10 +887,9 @@ async function processNewEmail() {
       const subject = (parsedMessage.subject || '').trim() || '(kein Betreff)';
       const text = (parsedMessage.text || '').trim() || '(kein Text)';
       LOG.info(
-        'Received %s teacher %d%s: "%s" (%d characters; IMAP ID %d)',
-        isReply ? 'reply to' : 'email for', teacherId,
-        recipient.name ? ' (' + recipient.name + ')' : '',
-        subject, text.length, message.seq);
+          `Received ${isReply ? 'reply to' : 'email for'} teacher ${teacherId}${
+          recipient.name ? ` (${recipient.name})` : ''}: "${subject}" (${
+          text.length} characters; IMAP ID ${message.seq})`);
       OUTBOUND.push({
         teacherId: teacherId,
         replyThreadId: isReply ? replyThreadId : undefined,
@@ -900,12 +899,12 @@ async function processNewEmail() {
       });
     }
   }
-  LOG.info('New incoming emails: %d', numNewMessages);
+  LOG.info(`New incoming emails: ${numNewMessages}`);
 
   if (Object.keys(ignoredMessages).length) {
     const seqs = Object.keys(ignoredMessages).join();
     await IMAP_CLIENT.messageFlagsAdd({seq: seqs}, ['\\Answered']);
-    LOG.debug('Marked ignored emails: %s', seqs);
+    LOG.debug(`Marked ignored emails: ${seqs}`);
   }
 
   return !!numNewMessages;
@@ -913,7 +912,7 @@ async function processNewEmail() {
 
 async function markEmailDone(seq) {
   await IMAP_CLIENT.messageFlagsAdd({ seq: seq }, ['\\Answered']);
-  LOG.debug('Marked processed email: %d', seq);
+  LOG.debug(`Marked processed email: ${seq}`);
 }
 
 // ---------- Orchestration ----------
