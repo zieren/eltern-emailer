@@ -503,10 +503,12 @@ async function readNoticeBoard(page, previousHashes) {
   // archived since the last run (e.g. vacation or other local downtime). To make sure hashes are
   // stable we need to do some contortions.
   const subjects = await page.$$eval('div.well h4', hh => hh.map(h => h.innerHTML));
-  const currentContents = await page.$$eval('div.well h4 ~ p', pp => pp.map(p => p.outerHTML));
+  // TODO: Support attachments.
+  // const anchors = await page.$$eval('div.well h4', hh => hh.map(h => h.closest('div.well').querySelectorAll('a')));
+  const currentContents = await page.$$eval('div.well h4 + p', pp => pp.map(p => p.outerHTML));
   const archivedContents = await page.$$eval(
-      'div.arch div.well div.row ~ div.row p:first-child',
-      pp => pp.map(p => p.outerHTML));
+    'div.arch div.well div.row:nth-of-type(2) p:first-of-type',
+    pp => pp.map(p => p.outerHTML));
   const contents = currentContents.concat(archivedContents);
   if (subjects.length != contents.length) {
     throw new Error(`Found ${subjects.length} subjects, but ${contents.length} contents`);
