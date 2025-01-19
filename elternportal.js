@@ -608,7 +608,7 @@ function reportAndRemoveEventsWithErrors(events) {
   });
   if (errors) {
     INBOUND.push({ 
-      email: em.buildEmailAdmin('Termine konnte nicht verarbeitet werden', {text: errors}),
+      email: em.buildEmailAdmin('Termine konnten nicht verarbeitet werden', {text: errors}),
       ok: () => {}
     });
   }
