@@ -1,5 +1,5 @@
 global.USER_AGENT = 'Eltern-Emailer 0.9.2'
-const LOG_STARTUP_MESSAGE = `${USER_AGENT} (c) 2022-2024 Jörg Zieren, GNU GPL v3.`
+const LOG_STARTUP_MESSAGE = `${USER_AGENT} (c) 2022-2025 Jörg Zieren, GNU GPL v3.`
     + ' See https://zieren.de/software/eltern-emailer for component license info';
 
 const fs = require('fs-extra');
