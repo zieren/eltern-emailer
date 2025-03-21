@@ -141,13 +141,13 @@ function setEmptyState(state, emptyState) {
 function processFlags(flags) {
   // Flags override values in config file.
   if (elternPortalConfigured()) { // section may be absent
-    CONFIG.elternportal.pass = flags.ep_password || CONFIG.elternportal.pass;
+    CONFIG.elternportal.pass = flags.ep_password || CONFIG.elternportal.pass || process.env.EP_PASSWORD;
   }
   if (schulmanagerConfigured()) { // section may be absent
-    CONFIG.schulmanager.pass = flags.sm_password || CONFIG.schulmanager.pass;
+    CONFIG.schulmanager.pass = flags.sm_password || CONFIG.schulmanager.pass || process.env.SM_PASSWORD;
   }
-  CONFIG.smtp.auth.pass = flags.smtp_password || CONFIG.smtp.auth.pass;
-  CONFIG.imap.auth.pass = flags.imap_password || CONFIG.imap.auth.pass;
+  CONFIG.smtp.auth.pass = flags.smtp_password || CONFIG.smtp.auth.pass || process.env.SMTP_PASSWORD;
+  CONFIG.imap.auth.pass = flags.imap_password || CONFIG.imap.auth.pass || process.env.IMAP_PASSWORD;
   CONFIG.options.mute = flags.mute !== undefined ? flags.mute : CONFIG.options.mute;
   CONFIG.options.once = flags.once !== undefined ? flags.once : CONFIG.options.once;
   CONFIG.options.test = flags.test !== undefined ? flags.test : CONFIG.options.test;
