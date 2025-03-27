@@ -269,6 +269,21 @@ The following flags are supported:
 * `--smtp_password=abc123` Specify the SMTP server password.
 * `--imap_password=abc123` Specify the IMAP server password.
 
+Passwords are accept from different sources with the following priority:
+1. Passwords specified on the command line override passwords from `config.json`
+2. Passwords in `config.json` are the default
+3. Passwords from environment variables are taken as fallback, if there is neither a password in
+   `config.json` nor on the command line
+
+## Environment variables
+
+The following environment variables are supported:
+
+* `EP_PASSWORD` Specify the Eltern-Portal login password.
+* `SM_PASSWORD` Specify the Schulmanager login password.
+* `SMTP_PASSWORD` Specify the SMTP server password.
+* `IMAP_PASSWORD` Specify the IMAP server password.
+
 ## Log File
 
 Log messages are shown on the console and written to the file `eltern-emailer.log` Log files are rotated at 10MB, keeping at most three files. The log level can be set in the config file. It defaults to `debug`.
