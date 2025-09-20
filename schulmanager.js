@@ -21,9 +21,6 @@ const EMPTY_STATE = {
 // ---------- Login ----------
 
 async function login(page) {
-  if (!CONFIG.schulmanager) {
-    return;
-  }
   maybeCreateTempDir();
   await page.goto('https://login.schulmanager-online.de/');
   await page.waitForSelector('#emailOrUsername');
