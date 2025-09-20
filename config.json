@@ -3,6 +3,7 @@
     "url": "https://SCHOOL.eltern-portal.org/",
     "user": "EMAIL ADDRESS FOR LOGIN",
     "pass": "PASSWORD",
+    "school": "(PART OF) SCHOOL NAME TO SELECT ON LOGIN, IF MULTIPLE",
     "tag": "SHORT NAME IN EMAIL SENDER AND CALENDAR EVENTS",
     "eventLookaheadDays": 7,
     "messageSizeLimit": 512,

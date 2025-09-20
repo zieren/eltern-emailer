@@ -127,6 +127,7 @@ These parameters are used to process Schulmanager. To disable Schulmanager, leav
 
 * `user` The login email address
 * `pass` The login password
+* `school` If your Schulmanager account is linked to multiple schools (e.g. multiple children, or after switching schools when the old account is still enabled), you are prompted to select a school on login. In this case, specify the name of the school or a unique part (e.g. "Heresbach" for "Konrad-Heresbach-Gymnasium"). Matching is case sensitive. If there is no selection dialog, this is ignored.
 * `tag` A short name used to identify the school in emails
 * `timeoutSeconds` This specifies the page timeout (e.g. for navigation). If absent or zero, the default is used (30s).
 * `recipients` This controls who receives the different categories of messages. Each takes a comma-separated list of zero or more addresses, enclosed in `[]`.
