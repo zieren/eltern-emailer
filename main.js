@@ -1,4 +1,4 @@
-global.USER_AGENT = 'Eltern-Emailer 0.9.2'
+global.USER_AGENT = 'Eltern-Emailer 0.9.3dev'
 const LOG_STARTUP_MESSAGE = `${USER_AGENT} (c) 2022-2025 Jörg Zieren, GNU GPL v3.`
     + ' See https://zieren.de/software/eltern-emailer for component license info';
 
