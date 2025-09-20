@@ -269,7 +269,7 @@ The following flags are supported:
 * `--smtp_password=abc123` Specify the SMTP server password.
 * `--imap_password=abc123` Specify the IMAP server password.
 
-Passwords are accept from different sources with the following priority:
+Passwords are accepted from different sources with the following priority:
 1. Passwords specified on the command line override passwords from `config.json`
 2. Passwords in `config.json` are the default
 3. Passwords from environment variables are taken as fallback, if there is neither a password in
