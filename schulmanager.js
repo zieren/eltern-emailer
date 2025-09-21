@@ -28,15 +28,16 @@ async function login(page) {
   await page.type('#password', CONFIG.schulmanager.pass);
   await page.click('button.btn-primary');
 
-  // Handle possible school selection dialog.
-  element = await Promise.race([
+  let winner = await Promise.race([
     page.waitForSelector('div.modal-dialog div.modal-content'), // school selection dialog
-    page.waitForSelector('a[href="#/modules/letters/view"]') // successful login
+    page.waitForSelector('a.dropdown-item.module-label"]'),     // successful login
+    page.waitForSelector('form.login-form div.alert-danger')    // invalid credentials
   ]);
-  const nodeNameHandle = await element.getProperty('nodeName');
-  const nodeName = await nodeNameHandle.jsonValue();
-  if (nodeName != 'A') {
-    const schools = await element.$$('div.btn-primary');
+  if (await winner.evaluate(e => e.classList.contains('alert-danger'))) {
+    throw 'Schulmanager login failed (invalid credentials?)';
+  }
+  if (await winner.evaluate(e => e.classList.contains('modal-content'))) {
+    const schools = await winner.$$('div.btn-primary');
     let school = null;
     let textContent = null;
     for (s of schools) {
@@ -52,11 +53,10 @@ async function login(page) {
     }
     LOG.info(`Selected school "${textContent.trim()}"`);
     await school.click();
-    element = await page.waitForSelector('a[href="#/modules/letters/view"]');
+    winner = await page.waitForSelector('a.dropdown-item.module-label');
   }
  
-  // TODO: Handle invalid password better than by just timing out.
-  if (!element) {
+  if (!winner) {
     throw 'Login Schulmanager failed';
   }
   LOG.info('Login Schulmanager OK');
