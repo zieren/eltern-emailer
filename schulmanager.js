@@ -41,8 +41,7 @@ async function login(page) {
     let school = null;
     let textContent = null;
     for (s of schools) {
-      const textContentHandle = await s.getProperty('textContent');
-      textContent = await textContentHandle.jsonValue();
+      textContent = await s.evaluate(e => e.textContent);
       if (textContent.includes(CONFIG.schulmanager.school)) {
         school = s;
         break;
