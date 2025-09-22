@@ -164,7 +164,7 @@ function buildEmailsForAnnouncements(page, announcements, processedAnnouncements
       // the reception date instead), so it's the best we can do.
       .reverse()
       .map(a => {
-        const email = em.buildEmailEpAnnouncements(a.subject, {
+        const email = buildEmailAnnouncements(a.subject, {
           text: a.body,
           date: new Date(a.dateString)});
         if (a.content) {
@@ -331,7 +331,7 @@ function buildEmailsForThreads(teachers, processedThreads) {
           // The thread ID seems to be globally unique. Including the teacher ID simplifies posting
           // replies, because the mail client will put this ID in the In-Reply-To header.
           const messageIdBase = `thread-${teacher.id}-${thread.id}-`;
-          const email = em.buildEmailEpThreads(msg.author, thread.subject, {
+          const email = buildEmailThreads(msg.author, thread.subject, {
             messageId: em.buildMessageId(messageIdBase + i),
             text: msg.body
           });
@@ -408,7 +408,7 @@ function buildEmailsForInquiries(inquiries, state) {
       const hash = md5(`${inquiry.subject}\n${message.date}\n${message.text}`);
       prunedHashes[hash] = 1;
       if (!state.inquiries[hash]) {
-        const email = em.buildEmailEpThreads(
+        const email = buildEmailThreads(
             INQUIRY_AUTHOR[Math.min(j, 2)],
             inquiry.subject,
             {
@@ -489,7 +489,7 @@ async function readSubstitutions(page, previousHashes) {
       </style></head>
       <body>${contentHTML}</body></html>`;
   INBOUND.push({
-    email: em.buildEmailEpSubstitutions({html: fullHTML}),
+    email: buildEmailSubstitutions({html: fullHTML}),
     ok: () => { previousHashes.substitutions = newHashes; }
   });
   LOG.info('Found substitution plan update');
@@ -526,7 +526,7 @@ async function readNoticeBoard(page, previousHashes) {
     LOG.info('Found notice board message');
     newHashes[hash] = 0; // indicate "not yet done"
     INBOUND.push({
-      email: em.buildEmailEpNotices(subject, {
+      email: buildEmailNotices(subject, {
         html: `<!DOCTYPE html><html><head></head><body>${content}</body></html>`
       }),
       ok: () => { newHashes[hash] = 1; }
@@ -707,7 +707,7 @@ async function readEvents(page, stateEP) {
     })};
 
   INBOUND.push({
-    email: em.buildEmailEpEvents({html: emailHTML}),
+    email: buildEmailEvents({html: emailHTML}),
     ok: () => okHandler()
   });
 }
@@ -915,6 +915,49 @@ async function processNewEmail() {
 async function markEmailDone(seq) {
   await IMAP_CLIENT.messageFlagsAdd({ seq: seq }, ['\\Answered']);
   LOG.debug(`Marked processed email: ${seq}`);
+}
+
+// ---------- Email construction ----------
+
+function buildEmailAnnouncements(subject, options) {
+  return em.buildEmail(
+      `${CONFIG.elternportal.tag} Elternbrief`,
+      CONFIG.elternportal.recipients['*'].concat(CONFIG.elternportal.recipients.elternbriefe),
+      subject,
+      options);
+}
+
+function buildEmailEvents(options) {
+  return em.buildEmail(
+      `${CONFIG.elternportal.tag} Termine`,
+      CONFIG.elternportal.recipients['*'].concat(CONFIG.elternportal.recipients.termine),
+      'Bevorstehende Termine',
+      options);
+}
+
+function buildEmailNotices(subject, options) {
+  return em.buildEmail(
+      `${CONFIG.elternportal.tag} Schwarzes Brett`,
+      CONFIG.elternportal.recipients['*'].concat(CONFIG.elternportal.recipients.schwarzesbrett),
+      subject,
+      options);
+}
+
+function buildEmailSubstitutions(options) {
+  return em.buildEmail(
+      `${CONFIG.elternportal.tag} Vertretungsplan`,
+      CONFIG.elternportal.recipients['*'].concat(CONFIG.elternportal.recipients.vertretungsplan),
+      'Vertretungsplan',
+      options);
+}
+
+function buildEmailThreads(teacherName, subject, options) {
+  return em.buildEmail(
+      `${CONFIG.elternportal.tag} ${teacherName}`,
+      CONFIG.elternportal.recipients['*'].concat(
+          CONFIG.elternportal.recipients.lehrerkommunikation),
+      subject,
+      options);
 }
 
 // ---------- Orchestration ----------

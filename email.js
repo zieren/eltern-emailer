@@ -26,55 +26,6 @@ function buildEmailAdmin(subject, options) {
   return buildEmail(`Eltern-Emailer`, CONFIG.options.adminAddress, subject, options);
 }
 
-function buildEmailEpAnnouncements(subject, options) {
-  return buildEmail(
-      `${CONFIG.elternportal.tag} Elternbrief`,
-      CONFIG.elternportal.recipients['*'].concat(CONFIG.elternportal.recipients.elternbriefe),
-      subject,
-      options);
-}
-
-function buildEmailEpEvents(options) {
-  return buildEmail(
-      `${CONFIG.elternportal.tag} Termine`,
-      CONFIG.elternportal.recipients['*'].concat(CONFIG.elternportal.recipients.termine),
-      'Bevorstehende Termine',
-      options);
-}
-
-function buildEmailEpNotices(subject, options) {
-  return buildEmail(
-      `${CONFIG.elternportal.tag} Schwarzes Brett`,
-      CONFIG.elternportal.recipients['*'].concat(CONFIG.elternportal.recipients.schwarzesbrett),
-      subject,
-      options);
-}
-
-function buildEmailEpSubstitutions(options) {
-  return buildEmail(
-      `${CONFIG.elternportal.tag} Vertretungsplan`,
-      CONFIG.elternportal.recipients['*'].concat(CONFIG.elternportal.recipients.vertretungsplan),
-      'Vertretungsplan',
-      options);
-}
-
-function buildEmailEpThreads(teacherName, subject, options) {
-  return buildEmail(
-      `${CONFIG.elternportal.tag} ${teacherName}`,
-      CONFIG.elternportal.recipients['*'].concat(
-          CONFIG.elternportal.recipients.lehrerkommunikation),
-      subject,
-      options);
-}
-
-function buildEmailSmAnnouncements(subject, options) {
-  return buildEmail(
-      `${CONFIG.schulmanager.tag} Elternbrief`,
-      CONFIG.schulmanager.recipients['*'].concat(CONFIG.schulmanager.recipients.elternbriefe),
-      subject,
-      options);
-}
-
 // Centralizes setting of common email options.
 function buildEmail(fromName, recipients, subject, options) {
   const email = {...{
@@ -93,13 +44,8 @@ function buildEmail(fromName, recipients, subject, options) {
 }
 
 module.exports = { 
+  buildEmail,
   buildMessageId, 
   createTestEmail, 
-  buildEmailAdmin,
-  buildEmailEpAnnouncements,
-  buildEmailEpEvents,
-  buildEmailEpNotices,
-  buildEmailEpSubstitutions,
-  buildEmailEpThreads,
-  buildEmailSmAnnouncements
+  buildEmailAdmin
 }

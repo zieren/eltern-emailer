@@ -219,7 +219,7 @@ async function readLetters(page, processedLetters) {
 
 function buildEmailsForLetters(letters, processedLetters) {
   for (const letter of letters) {
-    const email = em.buildEmailSmAnnouncements(letter.subject, {
+    const email = buildEmailAnnouncements(letter.subject, {
       // Let the message ID be random; we never reference this message.
       text: letter.text,
       html: letter.html,
@@ -231,6 +231,14 @@ function buildEmailsForLetters(letters, processedLetters) {
       ok: () => { processedLetters[letter.id] = 1; }
     });
   }
+}
+
+function buildEmailAnnouncements(subject, options) {
+  return em.buildEmail(
+      `${CONFIG.schulmanager.tag} Elternbrief`,
+      CONFIG.schulmanager.recipients['*'].concat(CONFIG.schulmanager.recipients.elternbriefe),
+      subject,
+      options);
 }
 
 // ---------- Orchestration ----------
