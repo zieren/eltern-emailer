@@ -1,4 +1,19 @@
 {
+  "jobs": {
+    "UNIQUE JOB NAME": {
+      "system": "schulmanager",
+      "active": true,
+      "user": "EMAIL ADDRESS FOR LOGIN",
+      "pass": "PASSWORD",
+      "school": "(PARTIAL) NAME OF SCHOOL IN CASE OF SELECTION DIALOG, OTHERWISE IGNORED",
+      "tag": "SHORT NAME IN EMAIL SENDER",
+      "timeoutSeconds": 42,
+      "recipients": {
+        "*": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."],
+        "elternbriefe": []
+      }
+    }
+  },
   "elternportal": {
     "url": "https://SCHOOL.eltern-portal.org/",
     "user": "EMAIL ADDRESS FOR LOGIN",
@@ -16,16 +31,6 @@
       "schwarzesbrett": [],
       "vertretungsplan": [],
       "termine": []
-    }
-  },
-  "schulmanager": {
-    "user": "EMAIL ADDRESS FOR LOGIN",
-    "pass": "PASSWORD",
-    "tag": "SHORT NAME IN EMAIL SENDER",
-    "timeoutSeconds": 60,
-    "recipients": {
-      "*": ["PARENT 1 EMAIL ADDRESS", "PARENT 2 EMAIL ADDRESS ETC."],
-      "elternbriefe": []
     }
   },
   "smtp": {

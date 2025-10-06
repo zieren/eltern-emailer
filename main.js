@@ -6,6 +6,7 @@ const fs = require('fs-extra');
 const http = require('http');
 const { ImapFlow } = require('imapflow');
 const nodemailer = require('nodemailer');
+const path = require('path');
 const puppeteer = require('puppeteer');
 
 // ---------- Shared state ----------
@@ -20,15 +21,13 @@ global.CONFIG = {};
 // Inbound messages are intended for the user(s). They are generated from scraping the portal(s) and
 // emailed to the user(s) via SMTP.
 global.INBOUND = [];
-// The ~current time (epoch millis). Updated at the start of each main loop iteration.
-global.NOW = Date.now(); // init to actual now() because we need it for other initializations
 // The IMAP client. Initialized in main().
 global.IMAP_CLIENT = null;
 
 // ---------- Something like encapsulation ----------
 
-// Maybe I should have used classes, but it seems that it doesn't really matter much.
 const em = require('./email.js')
+// TODO: Make these classes.
 const ep = require('./elternportal.js');
 const sm = require('./schulmanager.js');
 
@@ -51,23 +50,20 @@ const CLI_OPTIONS = {
   ]
 };
 
-// State is global so that the status web server can access lastSuccessfulRun.
+// This holds state read from the state.json file, keyed by job name at top level.
 let STATE = {};
+
+// Last run in which all jobs were completed successfully (epoch millis).
+let LAST_SUCCESSFUL_RUN = 0;
 
 // This is OR-ed with what we read from state.json so keys etc. exist.
 const EMPTY_STATE = {
-  ep: ep.EMPTY_STATE,
-  sm: sm.EMPTY_STATE,
-  // Last successful run (epoch millis). This is conservative because it's actually the beginning of
-  // the scraping iteration. With a safety margin (to account for clock skew, server time
-  // inaccuracy, cache staleness etc.) it is used to improve performance by skipping old data. It is
-  // also exported and consumed by the (optional) monitor.ahk tool to alert on persistent failure.
-  lastSuccessfulRun: 0
+  ep: ep.EMPTY_STATE
 };
 
 // Forward IMAP logging to our own logger.
 const IMAP_LOGGER = {
-  debug: (o) => {}, // This is too noisy.
+  debug: (_) => {}, // This is too noisy.
   info: (o) => LOG.info('IMAP: %s', JSON.stringify(o)),
   // Some errors don't trigger the error handler, but only show up as an error or even just warning
   // level log. We do the same here as we do in the error handler; see there for comments.
@@ -104,11 +100,21 @@ let STATUS_SERVER = null;
 
 // ---------- Initialization functions ----------
 
+function getTmpDir() {
+  const tmpDir = `${__dirname}${path.sep}temp${path.sep}`;
+  if (!fs.existsSync(tmpDir)) {
+    fs.mkdirSync(tmpDir);
+    LOG.info(`Created tmp directory ${tmpDir}`);
+  }
+  fs.emptyDirSync(tmpDir);
+  return tmpDir;
+}
+
 async function maybeStartStatusServer() {
   if (STATUS_SERVER) return;
   STATUS_SERVER = http.createServer((_, res) => {
     res.setHeader('Content-Type', 'text/plain');
-    res.write(`${STATE.lastSuccessfulRun}`);
+    res.write(`${LAST_SUCCESSFUL_RUN}`);
     res.end();
   });
   STATUS_SERVER.listen(CONFIG.options.statusServerPort, () => {
@@ -140,6 +146,7 @@ function setEmptyState(state, emptyState) {
 
 function processFlags(flags) {
   // Flags override values in config file.
+  // TODO: Adapt to jobs.
   if (elternPortalConfigured()) { // section may be absent
     CONFIG.elternportal.pass = flags.ep_password || CONFIG.elternportal.pass || process.env.EP_PASSWORD;
   }
@@ -276,7 +283,7 @@ async function createImapClient() {
       })
       // Without an error handler, errors crash the entire NodeJS env!
       // Background: https://nodejs.dev/en/api/v19/events/
-      .on('error', (e) => {
+      .on('error', (_) => {
         // Error details were already logged by our custom logger.
         // AFAICT the IMAP client has two common types of errors:
         // 1. The IDLE connection fails, commonly e.g. after an OS suspend/resume cycle (tested on
@@ -319,20 +326,6 @@ async function disposeImapClient() {
 }
 
 // ---------- Main ----------
-
-async function tryProcess(process, timeoutSeconds) {
-  const page = await BROWSER.newPage();
-  if (timeoutSeconds) {
-    page.setDefaultTimeout(timeoutSeconds * 1000);
-  }
-  try {
-    await process(page, STATE);
-    return true;
-  } catch (e) {
-    LOG.error(`Error in ${process.name}:\n${e.stack || e}`);
-    return false;
-  }
-}
 
 async function maybeStartOrCheckImap() {
   if (!CONFIG.options.incomingEmail.enabled) {
@@ -389,13 +382,6 @@ async function main() {
 
   await maybeStartStatusServer();
 
-  // This is just a best effort check in case the user completely forgot to edit the file. We don't
-  // repeat it when we reread the file in the main loop.
-  if (!elternPortalConfigured() && !schulmanagerConfigured()) {
-    LOG.error('Please edit the config file to specify your login credentials, SMTP server etc.');
-    return 2;
-  }
-
   while (true) {
     if (SIGTERM_RECEIVED) {
       return 0;
@@ -404,7 +390,7 @@ async function main() {
     readState(flags);
 
     // Launch Puppeteer. On the Raspberry Pi the browser executable is typically named
-    // "chromium-browser", which must be specified. Other Linux systems may use "chromium".
+    // "chromium-browser", which must be specified. Desktop Linux or Windows don't need this.
     const puppeteerOptions = {headless: 'new'}; // prevent deprecation warning
     if (CONFIG.options.customBrowserExecutable) {
       puppeteerOptions.executablePath = CONFIG.options.customBrowserExecutable;
@@ -414,17 +400,46 @@ async function main() {
     }
     BROWSER = await puppeteer.launch(puppeteerOptions);
 
-    NOW = Date.now();
-
     // TODO: Warn user about "longer" issues (#65).
 
     // IMAP occasionally fails (for me), so we check the connection in each iteration.
     await maybeStartOrCheckImap();
-    // Process both EP and SM. If one fails we still want to send emails generated by the other.
-    const epOK = elternPortalConfigured() 
-        ? await tryProcess(ep.processElternPortal, CONFIG.elternportal.timeoutSeconds) : true;
-    const smOK = schulmanagerConfigured()
-        ? await tryProcess(sm.processSchulmanager, CONFIG.schulmanager.timeoutSeconds) : true;
+
+    let allOK = true;
+    for (const [name, config] of Object.entries(CONFIG.jobs)) {
+      if (!config.active) {
+        continue;
+      }
+      LOG.info(`Processing job "${name}"`);
+      STATE[name] ||= {};
+      const state = STATE[name];
+      const page = await (await BROWSER.createBrowserContext({
+        downloadBehavior: {
+          policy: 'allow', // Not all systems may need this, but it doesn't hurt.
+          downloadPath: getTmpDir()
+        }
+      })).newPage();
+      try {
+        switch ((config.system || 'undefined').toLowerCase()) {
+          case 'schulmanager': 
+            // We need to provide the tmp directory again because the download event only contains a
+            // relative filename (sic).
+            await new sm.Schulmanager(config, state, page, getTmpDir()).process();
+            break;
+          case 'elternportal':
+            if (CONFIG.elternportal.timeoutSeconds) {
+              page.setDefaultTimeout(timeoutSeconds * 1000);
+            }
+            ep.processElternPortal(page, STATE); 
+            break;
+          default:
+            throw new Error(`Unknown system: ${config.system}`)
+        }
+      } catch (e) {
+        allOK = false;
+        LOG.error(`Error:\n${(e && e.stack) || e}`);
+      }
+    }
 
     // We can now have a race: Consider the time it takes until we update "awake" to point to the
     // new "resolve" in the below Promise that waits for the next iteration. This time is probably
@@ -433,25 +448,19 @@ async function main() {
     // listener will call "awake" for the previous (already resolved) Promise. This case seems too
     // unlikely (and too benign) to spend any code complexity on.
 
-    const success = epOK && smOK;
     if (CONFIG.options.test) {
-      INBOUND = em.createTestEmail(INBOUND.length, success); // Replace with exactly one test email.
+      INBOUND = em.createTestEmail(INBOUND.length, allOK); // Replace with exactly one test email.
     }
     await sendEmails();
     if (!CONFIG.options.test) {
-      if (success) {
-        // If we have an error on one site, this may sacrifice performance on the other by not
-        // advancing lastSuccessfulRun. The alternative of keeping track of this per site doesn't
-        // seem worth it; we'd be optimizing for a rare error case (persistent failure) that needs
-        // to be resolved anyway.
-        STATE.lastSuccessfulRun = NOW;
-      }
       fs.writeFileSync(flags.state, JSON.stringify(STATE, null, 2));
     }
-
-    // Only close after OK handlers in the emails have run. Also wait for state to be persisted; if
-    // there is a Puppeteer error at this stage it shouldn't prevent that.
+    
+    // Only close after OK handlers in the emails have run and state has been persisted. If there is
+    // a Puppeteer error at this stage it shouldn't prevent either.
     await BROWSER.close();
+    
+    LAST_SUCCESSFUL_RUN = Date.now();
 
     if (CONFIG.options.once) {
       LOG.info('Terminating due to --once flag/option');
