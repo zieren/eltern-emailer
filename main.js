@@ -405,6 +405,7 @@ async function main() {
     // IMAP occasionally fails (for me), so we check the connection in each iteration.
     await maybeStartOrCheckImap();
 
+    const tmpDir = getTmpDir();
     let allOK = true;
     for (const [name, config] of Object.entries(CONFIG.jobs)) {
       if (!config.active) {
@@ -416,7 +417,7 @@ async function main() {
       const page = await (await BROWSER.createBrowserContext({
         downloadBehavior: {
           policy: 'allow', // Not all systems may need this, but it doesn't hurt.
-          downloadPath: getTmpDir()
+          downloadPath: tmpDir
         }
       })).newPage();
       try {
@@ -424,7 +425,7 @@ async function main() {
           case 'schulmanager': 
             // We need to provide the tmp directory again because the download event only contains a
             // relative filename (sic).
-            await new sm.Schulmanager(config, state, page, getTmpDir()).process();
+            await new sm.Schulmanager(config, state, page, tmpDir).process();
             break;
           case 'elternportal':
             if (CONFIG.elternportal.timeoutSeconds) {
