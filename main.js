@@ -27,9 +27,9 @@ global.IMAP_CLIENT = null;
 // ---------- Something like encapsulation ----------
 
 const em = require('./email.js')
-// TODO: Make these classes.
-const ep = require('./elternportal.js');
+const ep = require('./elternportal.js'); // TODO: Convert to class and remove globals.
 const sm = require('./schulmanager.js');
+const is = require('./isy-schule.js');
 
 // ---------- Constants ----------
 
@@ -426,6 +426,9 @@ async function main() {
             // We need to provide the tmp directory again because the download event only contains a
             // relative filename (sic).
             await new sm.Schulmanager(config, state, page, tmpDir).process();
+            break;
+          case 'isy':
+            await new is.IsySchule(config, state, page, tmpDir).process();
             break;
           case 'elternportal':
             if (CONFIG.elternportal.timeoutSeconds) {
