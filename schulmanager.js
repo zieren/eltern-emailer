@@ -41,8 +41,8 @@ class Schulmanager {
       this.#page.setDefaultTimeout(this.#config.timeoutSeconds * 1000);
     }
     await this.login();
-    const letters = await this.readLetters(this.#state.letters);
-    this.buildEmailsForLetters(letters, this.#state.letters);
+    const letters = await this.readLetters();
+    this.buildEmailsForLetters(letters);
   }
 
   async login() {
@@ -110,7 +110,7 @@ class Schulmanager {
     }
   }
 
-  // Puppeteer does not allow downloads by default. This returns a client with downloads enabled.
+  // We expect the page context to allow downloads, but events need to be enabled here.
   async createDownloadingClient() {
     const client = await this.#page.browser().target().createCDPSession();
     await client.send('Browser.setDownloadBehavior', {
@@ -120,7 +120,7 @@ class Schulmanager {
     return client;
   }
 
-  async readLetters(processedLetters) {
+  async readLetters() {
     await this.#page.goto('https://login.schulmanager-online.de/#/modules/letters/view');
     await this.#page.waitForSelector('a.back-link[href="#/dashboard"]');
     const logMsg = await this.expandLetters(0);
@@ -154,13 +154,13 @@ class Schulmanager {
     // Prune the list of processed IDs.
     let keepIds = {};
     allLetters.forEach(letter => keepIds[letter.id] = 1);
-    for (const id in processedLetters) {
+    for (const id in this.#state.letters) {
       if (!keepIds[id]) {
-        delete processedLetters[id];
+        delete this.#state.letters[id];
       }
     }
 
-    const letters = allLetters.filter(letter => !processedLetters[letter.id]);
+    const letters = allLetters.filter(letter => !this.#state.letters[letter.id]);
 
     // Retrieve letter content.
     for (const letter of letters) {
@@ -248,7 +248,7 @@ class Schulmanager {
     return letters.reverse(); // send in chronological order
   }
 
-  buildEmailsForLetters(letters, processedLetters) {
+  buildEmailsForLetters(letters) {
     for (const letter of letters) {
       const email = this.buildEmailElternbrief(letter.subject, {
         // Let the message ID be random; we never reference this message.
@@ -259,7 +259,7 @@ class Schulmanager {
       });
       INBOUND.push({
         email: email,
-        ok: () => { processedLetters[letter.id] = 1; }
+        ok: () => { this.#state.letters[letter.id] = 1; }
       });
     }
   }
