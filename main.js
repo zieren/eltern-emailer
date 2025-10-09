@@ -464,7 +464,9 @@ async function main() {
     // a Puppeteer error at this stage it shouldn't prevent either.
     await BROWSER.close();
     
-    LAST_SUCCESSFUL_RUN = Date.now();
+    if (allOK) {
+      LAST_SUCCESSFUL_RUN = Date.now();
+    }
 
     if (CONFIG.options.once) {
       LOG.info('Terminating due to --once flag/option');
