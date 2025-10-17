@@ -121,14 +121,14 @@ async function readAnnouncements(page) {
     (nodes) => nodes.map(
       (n) => {
         // Transform the date to a format that Date can parse.
-        const d = n.firstChild.nextSibling.textContent // it's a text node
+        const d = n.firstChild.nextSibling.nextSibling.textContent // it's a text node
             .match(/(\d\d)\.(\d\d)\.(\d\d\d\d) +(\d\d:\d\d:\d\d)/);
         return {
           // Use the ID also used for reading confirmation, because it should be stable.
           id: n.attributes.onclick.textContent.match(/\((\d+)\)/)[1],
           // Strip subject and date, which are in "n".
           body: n.parentElement.innerText.substring(n.innerText.length).trim(),
-          subject: n.firstChild.textContent,
+          subject: n.firstChild.nextSibling.textContent,
           url: n.tagName === 'A' ? n.href : null,
           // Date isn't serializable, so we need to use a string.
           dateString: d[3] + '-' + d[2] + '-' + d[1] + ' ' + d[4]
