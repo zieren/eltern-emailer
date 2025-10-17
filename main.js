@@ -21,6 +21,8 @@ global.CONFIG = {};
 // Inbound messages are intended for the user(s). They are generated from scraping the portal(s) and
 // emailed to the user(s) via SMTP.
 global.INBOUND = [];
+// The ~current time (epoch millis). Updated at the start of each main loop iteration.
+global.NOW = Date.now(); // init to actual now() because we need it for other initializations
 // The IMAP client. Initialized in main().
 global.IMAP_CLIENT = null;
 
@@ -400,6 +402,8 @@ async function main() {
     }
     BROWSER = await puppeteer.launch(puppeteerOptions);
 
+    NOW = Date.now();
+
     // TODO: Warn user about "longer" issues (#65).
 
     // IMAP occasionally fails (for me), so we check the connection in each iteration.
@@ -434,7 +438,7 @@ async function main() {
             if (CONFIG.elternportal.timeoutSeconds) {
               page.setDefaultTimeout(timeoutSeconds * 1000);
             }
-            ep.processElternPortal(page, STATE); 
+            await ep.processElternPortal(page, STATE); 
             break;
           default:
             throw new Error(`Unknown system: ${config.system}`)
