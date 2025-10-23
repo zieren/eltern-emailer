@@ -237,7 +237,7 @@ async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
     // It's brittle to extract the teacher name using (possibly localized) text content, but in our
     // school the name here is cleaner than the one in the overview. We fall back to the latter if
     // this fails.
-    const name = await page.$eval('form div h2',
+    const name = await page.$eval('div h2',
         h2 => {
           const n = h2.innerText.match(/Kommunikation mit (.+) im Schuljahr .*/);
           return n ? n[1] : null;
