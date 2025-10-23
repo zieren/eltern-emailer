@@ -474,7 +474,7 @@ async function readSubstitutions(page, previousHashes) {
     return;
   }
   let contentHTML = // Start with the heading (school class etc.).
-    await page.$eval('div#asam_content table.table_header', table => table.outerHTML);
+    await page.$eval('div#asam_content h2', table => table.outerHTML);
   substitutions.forEach(sub => { // Add all days (empty days were omitted above), marking updates.
     const html = sub.updated ? `<span class="updated">*&nbsp;${sub.html}</span>` : sub.html;
     contentHTML += html;
