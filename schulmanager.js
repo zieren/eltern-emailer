@@ -54,7 +54,7 @@ class Schulmanager {
 
     let winner = await Promise.race([
       this.#page.waitForSelector('div.modal-dialog div.modal-content'), // school selection dialog
-      this.#page.waitForSelector('a.dropdown-item.module-label"]'),     // successful login
+      this.#page.waitForSelector('a.dropdown-item.module-label'),     // successful login
       this.#page.waitForSelector('form.login-form div.alert-danger')    // invalid credentials
     ]);
     if (await winner.evaluate(e => e.classList.contains('alert-danger'))) {
