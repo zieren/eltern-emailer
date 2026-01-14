@@ -196,10 +196,10 @@ class Schulmanager {
       // Wait for modal dialog to show.
       await this.#page.waitForSelector('span.close-button');
 
-      const content = await this.#page.$eval('div.letter-title ~ div', (d) => {
+      const content = await this.#page.$$eval('div.letter-title ~ div', divs => {
         return {
-          text: d.innerText,
-          html: `<!DOCTYPE html><html><head></head><body>${d.innerHTML}</body></html>`
+          text: divs.map(d => d.innerText).join('\n'),
+          html: `<!DOCTYPE html><html><head></head><body>${divs.map(d => d.innerHTML)}</body></html>`
         };
       });
       letter.text = content.text;
