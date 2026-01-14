@@ -210,7 +210,7 @@ class Schulmanager {
       // Retrieve attachments, if any. This doesn't use the same method as Eltern-Portal, i.e. a
       // simple HTTP request, because I found no good way of getting at the letter ID (and that's only
       // one of multiple parameters). 
-      const attachments = await this.#page.$$('div.letter-title ~ div:last-child label ~ div a');
+      const attachments = await this.#page.$$('div.letter-title ~ div label ~ div a');
       LOG.info(`Found ${attachments.length} attachments`);
 
       let client = null;
