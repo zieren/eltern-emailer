@@ -205,6 +205,7 @@ async function readThreadsMeta(page, lastSuccessfulRun) {
           // virtually the same optimization.
           const d = a.parentElement.innerText.match(/(\d\d)\.(\d\d).(\d\d\d\d)/);
           const id = a.href.match(/.*\/(\d+)$/)[1];
+          const teacherId = a.href.match(/.*\/(\d+)\/\d+$/)[1];
           // This may be specific to our school: EP displays a teacher's name in many different
           // variations. We can easily get one here, but it is dirtier than others: It is in "Last,
           // First" order, and some roles (e.g. director) are added after the name. It can also have
@@ -214,6 +215,7 @@ async function readThreadsMeta(page, lastSuccessfulRun) {
               .replace(/\n|(,$)/g, ' ').trim();
           return {
             id: id,
+            teacherId: teacherId,
             url: a.href,
             subject: a.textContent,
             teacherName: name,
@@ -225,9 +227,6 @@ async function readThreadsMeta(page, lastSuccessfulRun) {
         })))
       .filter(a => a.latest >= lastSuccessfulRun);
   LOG.info(`Found ${threads.length} recent threads with teachers`);
-  for (const thread of threads) {
-    LOG.info(`- ${thread.id} ${thread.teacherName}: ${thread.url}`);
-  }
   return threads;
 }
 
@@ -258,8 +257,8 @@ async function readThreadsContents(page, threads) {
       thread.subject = thread.messages[0]?.subject
       thread.messages = thread.messages.filter(message => message.body || message.attachments.length > 0);
       LOG.debug(
-        'Read %d recent messages with %s in "%s" (#%d)',
-        thread.messages.length, thread.teacherName, thread.subject, thread.id);
+        'Read %d recent messages with %s (#%d) in "%s" (#%d)',
+        thread.messages.length, thread.teacherName, thread.teacherId, thread.subject, thread.id);
     }
 }
 
@@ -295,7 +294,7 @@ function buildEmailsForThreads(threads, processedThreads) {
           const msg = thread.messages[i];
           // The thread ID seems to be globally unique. Including the teacher ID simplifies posting
           // replies, because the mail client will put this ID in the In-Reply-To header.
-          const messageIdBase = `thread-${thread.id}-`;
+          const messageIdBase = `thread-${thread.teacherId}-${thread.id}-`;
           const email = buildEmailThreads(msg.author, thread.subject, {
             messageId: em.buildMessageId(messageIdBase + i),
             text: msg.body
@@ -310,7 +309,7 @@ function buildEmailsForThreads(threads, processedThreads) {
           if (CONFIG.options.incomingEmail.forwardingAddress) {
             // We always put the teacher ID here, so the user can also reply to their own messages.
             const address =
-              CONFIG.options.incomingEmail.forwardingAddress.replace('@', `+${thread.id}@`);
+              CONFIG.options.incomingEmail.forwardingAddress.replace('@', `+${thread.teacherId}@`);
             email.replyTo = `"${thread.teacherName}" <${address}>`;
           }
           INBOUND.push({
@@ -943,7 +942,7 @@ async function processElternPortal(page, state) {
   buildEmailsForInquiries(inquiries, state.ep);
 
   // Section "Kommunikation Eltern/Fachlehrer".
-  state.lastSuccessfulRun = state.lastSuccessfulRun || 0;
+  state.lastSuccessfulRun = state.lastSuccessfulRun || 0; // TODO: what to use?
   const threads = await readThreadsMeta(page, state.lastSuccessfulRun);
   await readThreadsContents(page, threads);
   await readThreadsAttachments(page, threads, state.ep.threads);
