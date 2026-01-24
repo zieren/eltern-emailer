@@ -191,13 +191,12 @@ function buildEmailsForAnnouncements(page, announcements, processedAnnouncements
 
 // ---------- Threads ----------
 
-// Returns a list of teachers with at least one recent thread.
-async function readActiveTeachers(page, lastSuccessfulRun) {
-  await page.goto(`${CONFIG.elternportal.url}/meldungen/kommunikation_fachlehrer`);
-  const teachers = (await page.$$eval(
-      // New messages cause a "Neu" indicator with the same href as the teacher. The :first-child
-      // selector prevents duplicates from that.
-      'td:nth-child(3) a[href*="meldungen/kommunikation_fachlehrer/"]:first-child',
+// Reads metadata for all threads, based on active teachers returned by readActiveTeachers().
+// Threads are stored with key 'threads' for each teacher.
+async function readThreadsMeta(page, lastSuccessfulRun) {
+  await page.goto(`${CONFIG.elternportal.url}/meldungen/kommunikation_fachlehrer/`);
+  const threads = (await page.$$eval(
+      'div.card a[href*="/meldungen/kommunikation_fachlehrer/"]',
       anchors => anchors.map(
         a => {
           // We use just the date to find teachers with ~recent threads. This was originally because
@@ -211,12 +210,13 @@ async function readActiveTeachers(page, lastSuccessfulRun) {
           // First" order, and some roles (e.g. director) are added after the name. It can also have
           // newlines and for some reason often has a trailing comma. Later on we can get a cleaner
           // version, so we use this just for logging.
-          const nameForLogging = a.parentElement.parentElement.firstChild.innerText
+          const name = a.parentElement.parentElement.parentElement.parentElement.parentElement.parentElement.querySelector('div.header').innerText
               .replace(/\n|(,$)/g, ' ').trim();
           return {
             id: id,
             url: a.href,
-            nameForLogging: nameForLogging,
+            subject: a.textContent,
+            teacherName: name,
             // We add two days to the date to account for a) lacking time of day, b) timezones, and
             // c) clock skew. There is no need to cut it close, the performance gain would not
             // outweigh complexity.
@@ -224,82 +224,49 @@ async function readActiveTeachers(page, lastSuccessfulRun) {
           };
         })))
       .filter(a => a.latest >= lastSuccessfulRun);
-  LOG.info(`Found ${teachers.length} teachers with recent threads`);
-  return teachers;
-}
-
-// Reads metadata for all threads, based on active teachers returned by readActiveTeachers().
-// Threads are stored with key 'threads' for each teacher.
-async function readThreadsMeta(page, teachers, lastSuccessfulRun) {
-  for (const teacher of teachers) {
-    LOG.debug(`Reading threads with ${teacher.nameForLogging}`);
-    await page.goto(teacher.url);
-    // It's brittle to extract the teacher name using (possibly localized) text content, but in our
-    // school the name here is cleaner than the one in the overview. We fall back to the latter if
-    // this fails.
-    const name = await page.$eval('div h2',
-        h2 => {
-          const n = h2.innerText.match(/Kommunikation mit (.+) im Schuljahr .*/);
-          return n ? n[1] : null;
-        })
-        || teacher.nameForLogging;
-    teacher.threads = (await page.$$eval(
-      'a[href*="meldungen/kommunikation_fachlehrer/"]',
-      anchors => anchors.map((a) => {
-        // See matching comments in readActiveTeachers() above.
-        const d = a.parentElement.previousSibling.textContent.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
-        const id = a.href.match(/.*\/(\d+)$/)[1];
-        return {
-          id: id,
-          url: a.href,
-          subject: a.textContent,
-          // See matching comments in readActiveTeachers() above.
-          latest: new Date(d[3], d[2] - 1, parseInt(d[1]) + 2).getTime()
-        };
-      })))
-      .filter(t => t.latest >= lastSuccessfulRun)
-      .map(t => { 
-        t.teacherName = name;
-        return t;
-      });
+  LOG.info(`Found ${threads.length} recent threads with teachers`);
+  for (const thread of threads) {
+    LOG.info(`- ${thread.id} ${thread.teacherName}: ${thread.url}`);
   }
+  return threads;
 }
 
 /** Populates threads with contents, i.e. individual messages. */
-async function readThreadsContents(page, teachers) {
-  for (const teacher of teachers) {
+async function readThreadsContents(page, threads) {
     // Handle threads in chronological order by sorting by thread ID, which we assume is strictly
     // increasing.
-    teacher.threads.sort((t1, t2) => t1.id - t2.id);
-    for (const thread of teacher.threads) {
+    threads.sort((t1, t2) => t1.id - t2.id);
+    for (const thread of threads) {
       await page.goto(thread.url + '?load_all=1'); // Prevent pagination (I hope).
-      thread.messages = await page.$eval('div#last_messages',
+      // thread.messages = await page.$eval('div#message-thread-grid div.row :has(div.ui.segment)',
+      thread.messages = await page.$eval('div#message-thread-grid', // div.row',
         div => Array.from(div.children).map(row => {
           // I believe we can have multiple attachments, but I found no occurrence to verify.
-          const attachments = Array.from(row.querySelectorAll('a.link_nachrichten'))
+          const attachments = Array.from(row.querySelectorAll('a[href*="/get_file/"]'))
             .map(a => { return { url: a.href };});
           return {
-            author: !!row.querySelector('label span.link_buchungen'), // resolved below
-            body: row.querySelector('div div.form-control').textContent,
+            subject: row.querySelector('div.twelve strong')?.textContent,
+            author: row.querySelector('div strong span')?.textContent || (attachments.length > 0 && 'Anhang'),
+            body: row.querySelector('div.ui.segment')?.textContent || (attachments.length > 0 && 'siehe Anhang'),
             attachments: attachments
           };
-        }));
+        }))
       // We can't access "teacher" from Puppeteer, so set "author" here.
-      thread.messages.forEach(m => {
-        m.author = m.author ? thread.teacherName : 'Eltern';
-      });
+      // thread.messages.forEach(m => {
+      //   m.author = m.author ? thread.teacherName : 'Eltern';
+      // });
+      thread.subject = thread.messages[0]?.subject
+      thread.messages = thread.messages.filter(message => message.body || message.attachments.length > 0);
       LOG.debug(
-        'Read %d recent messages with %s in "%s"',
-        thread.messages.length, thread.teacherName, thread.subject);
+        'Read %d recent messages with %s in "%s" (#%d)',
+        thread.messages.length, thread.teacherName, thread.subject, thread.id);
     }
-  }
 }
 
-async function readThreadsAttachments(page, teachers, processedThreads) {
+async function readThreadsAttachments(page, threads, processedThreads) {
   let options = null;
   let wait = false;
-  for (const teacher of teachers) {
-    for (const thread of teacher.threads) {
+    for (const thread of threads) {
       for (let i = 0; i < thread.messages.length; ++i) {
         if (!(thread.id in processedThreads) || !(i in processedThreads[thread.id])) {
           for (const file of thread.messages[i].attachments) {
@@ -309,18 +276,16 @@ async function readThreadsAttachments(page, teachers, processedThreads) {
             }
             await downloadFile(file, options);
             wait = true;
-            LOG.info('Read attachment (%d kb) from "%s" in "%s"', // only teachers can attach files
-                file.content.length >> 10, teacher.nameForLogging, thread.subject);
+            LOG.info('Read attachment (%d kb) from "%s" in "%s" (#%d)', // only teachers can attach files
+                file.content.length >> 10, thread.teacherName, thread.subject, thread.id);
           }
         }
       }
     }
-  }
 }
 
-function buildEmailsForThreads(teachers, processedThreads) {
-  for (const teacher of teachers) {
-    for (const thread of teacher.threads) {
+function buildEmailsForThreads(threads, processedThreads) {
+    for (const thread of threads) {
       if (!(thread.id in processedThreads)) {
         processedThreads[thread.id] = {};
       }
@@ -330,7 +295,7 @@ function buildEmailsForThreads(teachers, processedThreads) {
           const msg = thread.messages[i];
           // The thread ID seems to be globally unique. Including the teacher ID simplifies posting
           // replies, because the mail client will put this ID in the In-Reply-To header.
-          const messageIdBase = `thread-${teacher.id}-${thread.id}-`;
+          const messageIdBase = `thread-${thread.id}-`;
           const email = buildEmailThreads(msg.author, thread.subject, {
             messageId: em.buildMessageId(messageIdBase + i),
             text: msg.body
@@ -345,7 +310,7 @@ function buildEmailsForThreads(teachers, processedThreads) {
           if (CONFIG.options.incomingEmail.forwardingAddress) {
             // We always put the teacher ID here, so the user can also reply to their own messages.
             const address =
-              CONFIG.options.incomingEmail.forwardingAddress.replace('@', `+${teacher.id}@`);
+              CONFIG.options.incomingEmail.forwardingAddress.replace('@', `+${thread.id}@`);
             email.replyTo = `"${thread.teacherName}" <${address}>`;
           }
           INBOUND.push({
@@ -357,7 +322,6 @@ function buildEmailsForThreads(teachers, processedThreads) {
         }
       }
     }
-  }
 }
 
 // ---------- Inquiries ----------
@@ -979,11 +943,11 @@ async function processElternPortal(page, state) {
   buildEmailsForInquiries(inquiries, state.ep);
 
   // Section "Kommunikation Eltern/Fachlehrer".
-  const teachers = await readActiveTeachers(page, state.lastSuccessfulRun);
-  await readThreadsMeta(page, teachers, state.lastSuccessfulRun);
-  await readThreadsContents(page, teachers);
-  await readThreadsAttachments(page, teachers, state.ep.threads);
-  buildEmailsForThreads(teachers, state.ep.threads);
+  state.lastSuccessfulRun = state.lastSuccessfulRun || 0;
+  const threads = await readThreadsMeta(page, state.lastSuccessfulRun);
+  await readThreadsContents(page, threads);
+  await readThreadsAttachments(page, threads, state.ep.threads);
+  buildEmailsForThreads(threads, state.ep.threads);
 
   // Section "Vertretungsplan"
   await readSubstitutions(page, state.ep.hashes);
