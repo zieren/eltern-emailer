@@ -9,7 +9,7 @@ title: 'Eltern-Emailer'
 
 ## Overview
 
-Eltern-Emailer is an unofficial email interface for communicating with German schools using `*.eltern-portal.org` or `schulmanager-online.de`. It allows you to simply use your email client instead of having to log into yet another website. This has several advantages:
+Eltern-Emailer is an unofficial email interface for communicating with German schools using `*.isy-schule.de`, `schulmanager-online.de` or `*.eltern-portal.org`. It allows you to simply use your email client instead of having to log into yet another website. This has several advantages:
 
 * **Saves time**<br>
 You see new information immediately, including attachments.
@@ -29,7 +29,7 @@ Primarily `*.eltern-portal.org` is supported:
 * Receive emails from you and post them on the website (parent &rarr; teacher).
 * Notify you of upcoming events, news and substitutions (school &rarr; parent).
 
-Additionally, there is limited support for `schulmanager-online.de`:
+Additionally, there is limited support for `isy-schule.de` and `schulmanager-online.de`:
 
 * Retrieve messages ("Elternbriefe") 
 
