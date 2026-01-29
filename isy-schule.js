@@ -93,7 +93,14 @@ class IsySchule {
       const subjectText = await subjectHandle.evaluate(e => e.textContent.trim());
       const metaText = await subjectHandle.evaluate(e => e.nextElementSibling.textContent);
       const [, day, month, year] = metaText.match(/(\d\d)\.(\d\d)\.(\d\d\d\d)/);
-      const date = year ? new Date(year, month - 1, day) : new Date();
+      // The message lacks time of day. To approximate correct sorting in the client we use the
+      // current time, assuming that it's off by at most the polling interval. This only makes sense
+      // if the message is from the current day (i.e. no catch-up run).
+      const d = new Date();
+      const date =
+          d.getFullYear() == year && d.getMonth() == month - 1 && d.getDate() == day 
+          ? new Date(new Date().setFullYear(year, month - 1, day))
+          : new Date(year, month - 1, day);
       const [, from] = metaText.match(/\bVon\b(.*)/);
       const contentHandle = await this.#page.$('div.news-content');
       const contentText = await contentHandle.evaluate(e => e.innerText.trim());
