@@ -191,8 +191,7 @@ function buildEmailsForAnnouncements(page, announcements, processedAnnouncements
 
 // ---------- Threads ----------
 
-// Reads metadata for all threads, based on active teachers returned by readActiveTeachers().
-// Threads are stored with key 'threads' for each teacher.
+// Reads metadata for all threads.
 async function readThreadsMeta(page, lastSuccessfulRun) {
   await page.goto(`${CONFIG.elternportal.url}/meldungen/kommunikation_fachlehrer/`);
   const threads = (await page.$$eval(
@@ -245,15 +244,14 @@ async function readThreadsContents(page, threads) {
             .map(a => { return { url: a.href };});
           return {
             subject: row.querySelector('div.twelve strong')?.textContent,
+            // attachments are in their own divs.
+            // the perfect solution would be to merge the attachment with the previous message.
+            // for simplicity sake we send them as additional messages with author 'Anhang' and message body 'siehe Anhang'.
             author: row.querySelector('div strong span')?.textContent || (attachments.length > 0 && 'Anhang'),
             body: row.querySelector('div.ui.segment')?.textContent || (attachments.length > 0 && 'siehe Anhang'),
             attachments: attachments
           };
         }))
-      // We can't access "teacher" from Puppeteer, so set "author" here.
-      // thread.messages.forEach(m => {
-      //   m.author = m.author ? thread.teacherName : 'Eltern';
-      // });
       thread.subject = thread.messages[0]?.subject
       thread.messages = thread.messages.filter(message => message.body || message.attachments.length > 0);
       LOG.debug(
@@ -942,7 +940,7 @@ async function processElternPortal(page, state) {
   buildEmailsForInquiries(inquiries, state.ep);
 
   // Section "Kommunikation Eltern/Fachlehrer".
-  state.lastSuccessfulRun = state.lastSuccessfulRun || 0; // TODO: what to use?
+  state.lastSuccessfulRun = state.lastSuccessfulRun || global.NOW;
   const threads = await readThreadsMeta(page, state.lastSuccessfulRun);
   await readThreadsContents(page, threads);
   await readThreadsAttachments(page, threads, state.ep.threads);
