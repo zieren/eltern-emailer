@@ -498,7 +498,7 @@ async function readSubstitutions(page, previousHashes) {
 // ---------- Notice board ----------
 
 async function readNoticeBoard(page, previousHashes) {
-  await page.goto(CONFIG.elternportal.url + '/aktuelles/schwarzes_brett');
+  await page.goto(`${CONFIG.elternportal.url}/aktuelles/schwarzes_brett`);
   
   const entries = await page.$$eval('div.well', (wells) => {
     return wells.map(well => {
@@ -539,7 +539,7 @@ async function readNoticeBoard(page, previousHashes) {
     LOG.info('Found notice board message');
     newHashes[hash] = 0; // indicate "not yet done"
     INBOUND.push({
-      email: em.buildEmailEpNotices(subject, {
+      email: buildEmailNotices(subject, {
         html: `<!DOCTYPE html><html><head></head><body>${content}</body></html>`
       }),
       ok: () => { newHashes[hash] = 1; }
@@ -1009,4 +1009,5 @@ async function processElternPortal(page, state) {
 }
 
 module.exports = { EMPTY_STATE, processElternPortal, processNewEmail, haveOutbound }
+
 
