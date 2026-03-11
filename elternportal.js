@@ -499,26 +499,39 @@ async function readSubstitutions(page, previousHashes) {
 
 async function readNoticeBoard(page, previousHashes) {
   await page.goto(`${CONFIG.elternportal.url}/aktuelles/schwarzes_brett`);
-  // We extract both current and archived items, because an item may have been published and 
-  // archived since the last run (e.g. vacation or other local downtime). To make sure hashes are
-  // stable we need to do some contortions.
-  const subjects = await page.$$eval('div.well h4', hh => hh.map(h => h.innerHTML));
+  
+  const entries = await page.$$eval('div.well', (wells) => {
+    return wells.map(well => {
+      const h4 = well.querySelector('h4');
+      if (!h4) return null;
+
+      const subject = h4.innerHTML.trim();
+      const pElements = Array.from(well.querySelectorAll('p'));
+      
+      // ignore posting date
+      const content = pElements
+        .filter(p => !p.classList.contains('text-right'))
+        .map(p => p.outerHTML)
+        .join('\n');
+
+      return { subject, content };
+    }).filter(e => e !== null);
+  });
+
   // TODO: Support attachments.
-  // const anchors = await page.$$eval('div.well h4', hh => hh.map(h => h.closest('div.well').querySelectorAll('a')));
-  const currentContents = await page.$$eval('div.well h4 + p', pp => pp.map(p => p.outerHTML));
-  const archivedContents = await page.$$eval(
-    'div.arch div.well div.row:nth-of-type(2) p:first-of-type',
-    pp => pp.map(p => p.outerHTML));
-  const contents = currentContents.concat(archivedContents);
-  if (subjects.length != contents.length) {
-    throw new Error(`Found ${subjects.length} subjects, but ${contents.length} contents`);
-  }
+  const subjects = entries.map(e => e.subject);
+  const contents = entries.map(e => e.content);
 
   let newHashes = {};
   for (let i = 0; i < subjects.length; ++i) {
     const subject = subjects[i];
     const content = contents[i];
-    const hash = md5(`${md5(subject)} ${md5(content)}`);
+    // To make sure hashes are stable we need to do some contortions.
+    const cleanContent = content
+      .replace(/csrf=[a-f0-9]+/g, 'csrf=removed') // remove changing tokens
+      .replace(/\s+/g, ' ')                       // normalize spaces
+      .trim();
+    const hash = md5(`${md5(subject)} ${md5(cleanContent)}`);
     if (previousHashes.notices[hash]) {
       newHashes[hash] = 1; // indicate "done"
       continue;
@@ -996,3 +1009,5 @@ async function processElternPortal(page, state) {
 }
 
 module.exports = { EMPTY_STATE, processElternPortal, processNewEmail, haveOutbound }
+
+
