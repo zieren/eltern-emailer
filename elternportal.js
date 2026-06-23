@@ -231,33 +231,47 @@ async function readThreadsMeta(page, lastSuccessfulRun) {
 
 /** Populates threads with contents, i.e. individual messages. */
 async function readThreadsContents(page, threads) {
-    // Handle threads in chronological order by sorting by thread ID, which we assume is strictly
-    // increasing.
-    threads.sort((t1, t2) => t1.id - t2.id);
-    for (const thread of threads) {
-      await page.goto(thread.url + '?load_all=1'); // Prevent pagination (I hope).
-      // thread.messages = await page.$eval('div#message-thread-grid div.row :has(div.ui.segment)',
-      thread.messages = await page.$eval('div#message-thread-grid', // div.row',
-        div => Array.from(div.children).map(row => {
-          // I believe we can have multiple attachments, but I found no occurrence to verify.
-          const attachments = Array.from(row.querySelectorAll('a[href*="/get_file/"]'))
-            .map(a => { return { url: a.href };});
+  // sort threads by id
+  threads.sort((t1, t2) => t1.id - t2.id);
+  for (const thread of threads) {
+    await page.goto(thread.url + '?load_all=1');
+
+    thread.messages = await page.$eval('div#message-thread-grid', (grid) => {
+        const allRows = Array.from(grid.children);
+        return allRows.map((row, i) => {
+          const rightCol = row.querySelector('.twelve.wide.column');
+          const segment = rightCol?.querySelector('.ui.segment');
+
+          // a message row always has a segment (right)
+          let attachments = [];
+          if (segment) {
+              const nextRow = allRows[i + 1];
+              const nextRightCol = nextRow?.querySelector('.twelve.wide.column');
+
+              // get attachments from NEXT row if that has no new message segment
+              if (nextRightCol && !nextRightCol.querySelector('.ui.segment')) {
+                attachments = Array.from(nextRightCol.querySelectorAll('a[href*="get_file"]'))
+                  .map(a => ({ url: a.href }));
+              }
+          }
+
           return {
-            subject: row.querySelector('div.twelve strong')?.textContent,
-            // attachments are in their own divs.
-            // the perfect solution would be to merge the attachment with the previous message.
-            // for simplicity sake we send them as additional messages with author 'Anhang' and message body 'siehe Anhang'.
-            author: row.querySelector('div strong span')?.textContent || (attachments.length > 0 && 'Anhang'),
-            body: row.querySelector('div.ui.segment')?.textContent || (attachments.length > 0 && 'siehe Anhang'),
+            subject: rightCol?.querySelector('strong')?.textContent,
+            author: row.querySelector('.four.wide.column strong span')?.textContent.trim(),
+            body: segment?.textContent,
             attachments: attachments
           };
-        }))
-      thread.subject = thread.messages[0]?.subject
-      thread.messages = thread.messages.filter(message => message.body || message.attachments.length > 0);
-      LOG.debug(
-        'Read %d recent messages with %s (#%d) in "%s" (#%d)',
-        thread.messages.length, thread.teacherName, thread.teacherId, thread.subject, thread.id);
-    }
+        });
+    });
+
+    thread.subject = thread.messages[0]?.subject
+    thread.messages = thread.messages.filter(message => message.body);
+    LOG.debug(
+      'Read %d recent messages with %s (#%d) in "%s" (#%d)',
+      thread.messages.length, thread.teacherName, thread.teacherId, thread.subject, thread.id
+    );
+
+  }
 }
 
 async function readThreadsAttachments(page, threads, processedThreads) {
