@@ -940,7 +940,7 @@ async function processElternPortal(page, state) {
   buildEmailsForInquiries(inquiries, state.ep);
 
   // Section "Kommunikation Eltern/Fachlehrer".
-  state.lastSuccessfulRun = state.lastSuccessfulRun || global.NOW;
+  state.lastSuccessfulRun = state.lastSuccessfulRun || 0;
   const threads = await readThreadsMeta(page, state.lastSuccessfulRun);
   await readThreadsContents(page, threads);
   await readThreadsAttachments(page, threads, state.ep.threads);
@@ -954,6 +954,8 @@ async function processElternPortal(page, state) {
 
   // Section "Schulaufgaben / Weitere Termine"
   await readEvents(page, state.ep);
+
+  state.lastSuccessfulRun = global.NOW || state.lastSuccessfulRun;
 }
 
 module.exports = { EMPTY_STATE, processElternPortal, processNewEmail, haveOutbound }
