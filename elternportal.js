@@ -122,7 +122,7 @@ async function readAnnouncements(page) {
       (n) => {
         // Transform the date to a format that Date can parse.
         const d = n.firstChild.nextSibling.nextSibling.textContent // it's a text node
-            .match(/(\d\d)\.(\d\d)\.(\d\d\d\d) +(\d\d:\d\d:\d\d)/);
+            .match(/(\d\d)\.(\d\d)\.(\d\d\d\d)[, ]+(\d\d:\d\d)/);
         return {
           // Use the ID also used for reading confirmation, because it should be stable.
           id: n.attributes.onclick.textContent.match(/\((\d+)\)/)[1],
