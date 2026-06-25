@@ -1,0 +1,97 @@
+name: Build and Release
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+  push:
+    branches-ignore:
+      - main
+
+
+env:
+  BUILD: ${{ github.event.pull_request.merged == true && 'release' || 'development' }}
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    name: Build and Release
+    if: github.event.pull_request.merged == true || ( github.event_name == 'push' && github.event.push.ref != 'refs/heads/master' )
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+
+      - name: Checkout Merge Commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: '0'
+
+      - name: Bump version and push tag
+        if: github.event.pull_request.merged == true
+        uses: anothrNick/github-tag-action@1.67.0 # Don't use @master or @v1 unless you're happy to test the latest version
+        id: bump
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WITH_V: true
+          PRERELEASE: false
+          DEFAULT_BUMP: minor
+
+      - name: Set version and output info
+        run: |
+          VERSIONNUM=${VERSION#v}
+          echo "VERSIONNUM=$VERSIONNUM" >> $GITHUB_ENV
+          for var in GITHUB_EVENT_NAME GITHUB_REF_TYPE GITHUB_REF GITHUB_SHA MERGE_COMMIT_SHA BUILD VERSION VERSIONNUM; do
+            echo "- $var: ${!var}" >> $GITHUB_STEP_SUMMARY
+          done
+        env:
+          MERGE_COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          VERSION: ${{ github.event.pull_request.merged == true && steps.bump.outputs.new_tag || 'v0.0.1' }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=development,enable=${{ github.ref != 'refs/heads/master' }}
+            type=raw,value=${{ env.VERSIONNUM }}
+            type=schedule
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v3
+        with:
+          context: ./
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILDTAG=${{ env.VERSIONNUM }}
+
+      - name: Create release
+        uses: "marvinpinto/action-automatic-releases@d68defdd11f9dcc7f52f35c1b7c236ee7513bcc1"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: ${{ github.event.pull_request.merged != true }}
+          automatic_release_tag: v${{ env.VERSIONNUM }}
+          title: ${{ env.BUILD }} ${{ env.VERSIONNUM }}
