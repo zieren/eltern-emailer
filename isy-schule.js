@@ -1,11 +1,13 @@
 const fs = require('fs-extra');
-
+const path = require('path');
 const em = require('./email.js');
 
 // ---------- Shared state (initialized in main.js) ----------
 
 // global.LOG (see logging.js)
 // global.INBOUND (see main.js)
+
+const DOWNLOAD_TIMEOUT_DEFAULT_SECONDS = 30;
 
 const INITIAL_STATE = {
   news: {} // news IDs, mapped to value 1
@@ -79,7 +81,7 @@ class IsySchule {
     // Prune state.
     for (const id of Object.keys(this.#state.news)) {
       if (!(id in news)) {
-        delete this.#state[id];
+        delete this.#state.news[id];
       }
     }
 
@@ -112,32 +114,60 @@ class IsySchule {
         date: date
       };
 
-      const attachments = await this.#page.$$('a.news-attachment');
+      const attachments = await this.#page.$$('a.news-attachment[href="javascript:void(0);"]');
       for (const a of attachments) {
         client ||= await this.createDownloadingClient();
-        const downloadWillBegin = new Promise(resolve => {
-          client.on('Browser.downloadWillBegin', e => resolve(e));
+
+        let timeoutId;
+        const timeoutMs = (this.#config.timeoutSeconds ? this.#config.timeoutSeconds : DOWNLOAD_TIMEOUT_DEFAULT_SECONDS) * 1000;
+        const timeoutPromise = new Promise((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error(`Download timed out after ${timeoutMs}ms`)), timeoutMs);
         });
-        const downloadCompleted = new Promise((resolve, reject) => {
-          client.on('Browser.downloadProgress', e => {
+
+        let currentGuid;
+        let suggestedFilename;
+        let onWillBegin;
+        let onProgress;
+
+        const downloadProcess = new Promise((resolve, reject) => {
+          onWillBegin = (e) => {
+            currentGuid = e.guid;
+            suggestedFilename = e.suggestedFilename;
+          };
+
+          onProgress = (e) => {
+            // Ignore possible concurrent downloads (shouldn't happen, but seems cleaner).
+            if (currentGuid && e.guid !== currentGuid) return;
+
             if (e.state === 'completed') {
-              resolve();
+              resolve(suggestedFilename);
             } else if (e.state === 'canceled') {
-              reject(new Error(`Download was canceled: ${e.guid}`)); // There is no other info.
-            } // else: inProgress
-          });
+              reject(new Error(`Download was canceled: ${e.guid}`));
+            }
+          };
+
+          client.on('Browser.downloadWillBegin', onWillBegin);
+          client.on('Browser.downloadProgress', onProgress);
+
+          a.evaluate(el => el.click()).catch(reject);
         });
-        await a.evaluate(a => a.click());
-        const dl = await downloadWillBegin;
-        await downloadCompleted;
-        const filename = `${this.#downloadPath}${dl.suggestedFilename}`;
+
+        let downloadedFilename;
+        try {
+          downloadedFilename = await Promise.race([downloadProcess, timeoutPromise]);
+          // No catch, so a timeout exception bubbles up.
+        } finally {
+          clearTimeout(timeoutId);
+          if (onWillBegin) client.off('Browser.downloadWillBegin', onWillBegin);
+          if (onProgress) client.off('Browser.downloadProgress', onProgress);
+        }
+
+        const filename = path.join(this.#downloadPath, downloadedFilename);
         const content = fs.readFileSync(filename);
         options.attachments ||= [];
-        options.attachments.push({filename: dl.suggestedFilename, content: content});
-        LOG.info(`Message "${subjectText}", attachment "${dl.suggestedFilename}" downloaded`);
+        options.attachments.push({filename: downloadedFilename, content: content});
         fs.unlinkSync(filename);
       }
-
       const email = this.buildEmailNeuigkeiten(subjectText, from, options);
 
       INBOUND.push({
@@ -167,4 +197,4 @@ class IsySchule {
   }
 }
 
-module.exports = { IsySchule }
+module.exports = { IsySchule };
