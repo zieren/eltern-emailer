@@ -406,72 +406,81 @@ async function main() {
     }
     BROWSER = await puppeteer.launch(puppeteerOptions);
 
-    NOW = Date.now();
-
-    // TODO: Warn user about "longer" issues (#65).
-
-    // IMAP occasionally fails (for me), so we check the connection in each iteration.
-    await maybeStartOrCheckImap();
-
-    const tmpDir = getTmpDir();
     let allOK = true;
-    for (const [name, config] of Object.entries(CONFIG.jobs)) {
-      if (!config.active) {
-        continue;
-      }
-      LOG.info(`Processing job "${name}"`);
-      STATE[name] ||= {};
-      const state = STATE[name];
-      const page = await (await BROWSER.createBrowserContext({
-        downloadBehavior: {
-          policy: 'allow', // Not all systems may need this, but it doesn't hurt.
-          downloadPath: tmpDir
+    // Close the browser even if an error occurs below, otherwise the retry leaks a browser instance.
+    try {
+      NOW = Date.now();
+
+      // TODO: Warn user about "longer" issues (#65).
+
+      // IMAP occasionally fails (for me), so we check the connection in each iteration.
+      await maybeStartOrCheckImap();
+
+      const tmpDir = getTmpDir();
+      for (const [name, config] of Object.entries(CONFIG.jobs)) {
+        if (!config.active) {
+          continue;
         }
-      })).newPage();
+        LOG.info(`Processing job "${name}"`);
+        STATE[name] ||= {};
+        const state = STATE[name];
+        const page = await (await BROWSER.createBrowserContext({
+          downloadBehavior: {
+            policy: 'allow', // Not all systems may need this, but it doesn't hurt.
+            downloadPath: tmpDir
+          }
+        })).newPage();
+        try {
+          switch ((config.system || 'undefined').toLowerCase()) {
+            case 'schulmanager':
+              // We need to provide the tmp directory again because the download event only contains
+              // a relative filename (sic).
+              await new sm.Schulmanager(config, state, page, tmpDir).process();
+              break;
+            case 'isy':
+              await new is.IsySchule(config, state, page, tmpDir).process();
+              break;
+            case 'elternportal':
+              if (CONFIG.elternportal.timeoutSeconds) {
+                page.setDefaultTimeout(CONFIG.elternportal.timeoutSeconds * 1000);
+              }
+              await ep.processElternPortal(page, STATE);
+              break;
+            default:
+              throw new Error(`Unknown system: ${config.system}`)
+          }
+        } catch (e) {
+          allOK = false;
+          LOG.error(`Error:\n${(e && e.stack) || e}`);
+        }
+      }
+
+      // We can now have a race: Consider the time it takes until we update "awake" to point to the
+      // new "resolve" in the below Promise that waits for the next iteration. This time is probably
+      // mostly spent in sendEmails(). If during this time new content appears that we didn't cover
+      // just now, *and* the notification email is also received during this time, then our IMAP
+      // listener will call "awake" for the previous (already resolved) Promise. This case seems too
+      // unlikely (and too benign) to spend any code complexity on.
+
+      if (CONFIG.options.test) {
+        INBOUND = em.createTestEmail(INBOUND.length, allOK); // Replace with exactly one test email.
+      }
+      await sendEmails();
+      if (!CONFIG.options.test) {
+        fs.writeFileSync(flags.state, JSON.stringify(STATE, null, 2));
+      }
+    } finally {
+      // Only close after OK handlers in the emails have run and state has been persisted. If there
+      // is a Puppeteer error at this stage it shouldn't prevent either. A failure to close is only
+      // logged, so it doesn't mask an error from above.
       try {
-        switch ((config.system || 'undefined').toLowerCase()) {
-          case 'schulmanager': 
-            // We need to provide the tmp directory again because the download event only contains a
-            // relative filename (sic).
-            await new sm.Schulmanager(config, state, page, tmpDir).process();
-            break;
-          case 'isy':
-            await new is.IsySchule(config, state, page, tmpDir).process();
-            break;
-          case 'elternportal':
-            if (CONFIG.elternportal.timeoutSeconds) {
-              page.setDefaultTimeout(CONFIG.elternportal.timeoutSeconds * 1000);
-            }
-            await ep.processElternPortal(page, STATE); 
-            break;
-          default:
-            throw new Error(`Unknown system: ${config.system}`)
-        }
+        await BROWSER.close();
       } catch (e) {
-        allOK = false;
-        LOG.error(`Error:\n${(e && e.stack) || e}`);
+        LOG.error(`Failed to close browser:\n${(e && e.stack) || e}`);
       }
+      BROWSER = null;
     }
 
-    // We can now have a race: Consider the time it takes until we update "awake" to point to the
-    // new "resolve" in the below Promise that waits for the next iteration. This time is probably
-    // mostly spent in sendEmails(). If during this time new content appears that we didn't cover
-    // just now, *and* the notification email is also received during this time, then our IMAP
-    // listener will call "awake" for the previous (already resolved) Promise. This case seems too
-    // unlikely (and too benign) to spend any code complexity on.
-
-    if (CONFIG.options.test) {
-      INBOUND = em.createTestEmail(INBOUND.length, allOK); // Replace with exactly one test email.
-    }
-    await sendEmails();
-    if (!CONFIG.options.test) {
-      fs.writeFileSync(flags.state, JSON.stringify(STATE, null, 2));
-    }
-    
-    // Only close after OK handlers in the emails have run and state has been persisted. If there is
-    // a Puppeteer error at this stage it shouldn't prevent either.
-    await BROWSER.close();
-    
     if (allOK) {
       LAST_SUCCESSFUL_RUN = Date.now();
     }

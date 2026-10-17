@@ -57,20 +57,34 @@ function haveOutbound() {
   return !!OUTBOUND.length;
 }
 
-// Downloads from file.url, setting file.filename and file.content.
+// Downloads from file.url, setting file.filename and file.content. Rejects on HTTP errors and on
+// responses without a filename, which are typically error pages rather than files.
 async function downloadFile(file, options) {
   // Collect buffers and use Buffer.concat() to avoid chunk size arithmetics.
   let buffers = [];
   await new Promise((resolve, reject) => {
     // Downloads are throttled at the call sites. Otherwise we may see socket errors.
     https.get(file.url, options, (response) => {
-      file.filename =
-          contentDisposition.parse(response.headers['content-disposition']).parameters.filename;
+      // Exceptions thrown in this callback would not reject the Promise, so we catch them here.
+      try {
+        if (response.statusCode !== 200) {
+          throw new Error(`HTTP status ${response.statusCode}`);
+        }
+        // Throws if the header is missing or malformed.
+        file.filename =
+            contentDisposition.parse(response.headers['content-disposition']).parameters.filename;
+      } catch (e) {
+        response.resume(); // Discard the body to free the socket.
+        reject(new Error(`Failed to download ${file.url}: ${e.message}`));
+        return;
+      }
       response.on('data', (buffer) => {
         buffers.push(buffer);
       }).on('end', () => {
         file.content = Buffer.concat(buffers);
         resolve();
+      }).on('error', (error) => {
+        reject(error);
       });
     }).on('error', (error) => {
       reject(error);
