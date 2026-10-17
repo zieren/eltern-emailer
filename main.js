@@ -207,12 +207,32 @@ async function sendEmails() {
   }
   const transport = nodemailer.createTransport(CONFIG.smtp);
   let errors = [];
+  // After the last item, append an extra item for an error message if needed.
+  const maybeQueueErrorReport = (i) => {
+    if (i + 1 === INBOUND.length && errors.length) {
+      LOG.error('%d out of %d email(s) could not be sent, will retry in next iteration',
+          errors.length, INBOUND.length);
+      // We send an email to report an error sending email. The hope is that the error is transient.
+      INBOUND.push({
+        email: em.buildEmailAdmin(
+            'Emailversand fehlgeschlagen',
+            {
+              text: `${errors.length} von ${INBOUND.length} Email(s) konnte(n) nicht gesendet `
+                + `werden.\n\nFehler:\n${errors.join(',\n')}\n\nWeitere Details im Logfile.`
+            }),
+        ok: () => {},
+        ignoreFailure: true
+      });
+      errors = [];
+    }
+  };
   for (let i = 0; i < INBOUND.length; ++i) {
     const e = INBOUND[i];
     const recipients = e.email.to ? e.email.to : e.email.bcc;
     if (CONFIG.options.mute || !recipients.length) {
       LOG.info('Skipping email "%s" to %s', e.email.subject, recipients);
       await e.ok();
+      maybeQueueErrorReport(i);
       continue;
     }
     // Throttle outgoing emails.
@@ -239,23 +259,7 @@ async function sendEmails() {
     if (ok) {
       await e.ok();
     }
-    // Do we need an extra item for an error message?
-    if (i + 1 === INBOUND.length && errors.length) {
-      LOG.error('%d out of %d email(s) could not be sent, will retry in next iteration',
-          errors.length, INBOUND.length);
-      // We send an email to report an error sending email. The hope is that the error is transient.
-      INBOUND.push({
-        email: em.buildEmailAdmin(
-            'Emailversand fehlgeschlagen',
-            {
-              text: `${errors.length} von ${INBOUND.length} Email(s) konnte(n) nicht gesendet `
-                + `werden.\n\nFehler:\n${errors.join(',\n')}\n\nWeitere Details im Logfile.`
-            }),
-        ok: () => {},
-        ignoreFailure: true
-      });
-      errors = [];
-    }
+    maybeQueueErrorReport(i);
   }
 
   // Any message whose ok() handler didn't run was not added to our state and will simply be
@@ -436,7 +440,7 @@ async function main() {
             break;
           case 'elternportal':
             if (CONFIG.elternportal.timeoutSeconds) {
-              page.setDefaultTimeout(timeoutSeconds * 1000);
+              page.setDefaultTimeout(CONFIG.elternportal.timeoutSeconds * 1000);
             }
             await ep.processElternPortal(page, STATE); 
             break;
