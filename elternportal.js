@@ -92,6 +92,36 @@ async function downloadFile(file, options) {
   });
 }
 
+/**
+ * Like downloadFile(), but retries once on failure. If the retry also fails, sets file.downloadError
+ * instead of throwing. This prevents a broken attachment from halting the job in every iteration;
+ * the user is instead notified via a note in the email (see downloadFailedNote()).
+ */
+async function downloadFileOrMarkFailed(file, options) {
+  try {
+    await downloadFile(file, options);
+    return;
+  } catch (e) {
+    LOG.warn('%s; will retry once', e.message);
+  }
+  await sleepSeconds(CONFIG.elternportal.fileDownloadWaitSeconds);
+  try {
+    await downloadFile(file, options);
+  } catch (e) {
+    LOG.error('%s; sending email without this attachment', e.message);
+    file.downloadError = e.message;
+  }
+}
+
+/** Returns a note to append to an email body if n attachments could not be downloaded. */
+function downloadFailedNote(n) {
+  if (!n) {
+    return '';
+  }
+  return `\n\n[Eltern-Emailer: ${n} Anhang/Anhänge konnte(n) nicht heruntergeladen werden. Bitte im `
+      + 'Eltern-Portal nachsehen.]';
+}
+
 function sleepSeconds(seconds) {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
@@ -164,9 +194,11 @@ async function readAnnouncementsAttachments(page, announcements, processedAnnoun
     if (wait) {
       await sleepSeconds(CONFIG.elternportal.fileDownloadWaitSeconds);
     }
-    await downloadFile(a, options);
+    await downloadFileOrMarkFailed(a, options);
     wait = true;
-    LOG.info('Read attachment (%d kb) for: %s', a.content.length >> 10, a.subject);
+    if (a.content) {
+      LOG.info('Read attachment (%d kb) for: %s', a.content.length >> 10, a.subject);
+    }
   }
 }
 
@@ -179,7 +211,7 @@ function buildEmailsForAnnouncements(page, announcements, processedAnnouncements
       .reverse()
       .map(a => {
         const email = buildEmailAnnouncements(a.subject, {
-          text: a.body,
+          text: a.body + downloadFailedNote(a.downloadError ? 1 : 0),
           date: new Date(a.dateString)});
         if (a.content) {
           email.attachments = [
@@ -299,10 +331,12 @@ async function readThreadsAttachments(page, threads, processedThreads) {
             if (wait) {
               await sleepSeconds(CONFIG.elternportal.fileDownloadWaitSeconds);
             }
-            await downloadFile(file, options);
+            await downloadFileOrMarkFailed(file, options);
             wait = true;
-            LOG.info('Read attachment (%d kb) from "%s" in "%s" (#%d)', // only teachers can attach files
-                file.content.length >> 10, thread.teacherName, thread.subject, thread.id);
+            if (file.content) {
+              LOG.info('Read attachment (%d kb) from "%s" in "%s" (#%d)', // only teachers attach files
+                  file.content.length >> 10, thread.teacherName, thread.subject, thread.id);
+            }
           }
         }
       }
@@ -321,11 +355,12 @@ function buildEmailsForThreads(threads, processedThreads) {
           // The thread ID seems to be globally unique. Including the teacher ID simplifies posting
           // replies, because the mail client will put this ID in the In-Reply-To header.
           const messageIdBase = `thread-${thread.teacherId}-${thread.id}-`;
+          const numFailed = msg.attachments.filter(a => a.downloadError).length;
           const email = buildEmailThreads(msg.author, thread.subject, {
             messageId: em.buildMessageId(messageIdBase + i),
-            text: msg.body
+            text: msg.body + downloadFailedNote(numFailed)
           });
-          email.attachments = msg.attachments.map(a => {
+          email.attachments = msg.attachments.filter(a => !a.downloadError).map(a => {
             return { filename: a.filename, content: a.content };
           })
           if (i > 0) {
